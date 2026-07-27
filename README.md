@@ -153,6 +153,32 @@ After a rebuild, re-upload the binary from Windows/WSL:
 pscp board_deploy/ocr_server tpsadmin@192.168.1.101:/home/tpsadmin/board_deploy/ocr_server
 ```
 
+### Running as a Service (Survives Reboot)
+
+`board_deploy/ocr_server.service` is a systemd unit that starts `ocr_server` on boot and restarts it automatically if it crashes, the same way `kvmd_run.sh` already behaves.
+
+Install it once on the board:
+
+```bash
+sudo cp ~/board_deploy/ocr_server.service /etc/systemd/system/ocr_server.service
+sudo systemctl daemon-reload
+sudo systemctl enable ocr_server
+sudo systemctl start ocr_server
+```
+
+Check its status or logs:
+
+```bash
+sudo systemctl status ocr_server
+journalctl -u ocr_server -f
+```
+
+After re-uploading a rebuilt `ocr_server` binary, restart the service instead of running it manually:
+
+```bash
+sudo systemctl restart ocr_server
+```
+
 ### Current Limitations
 
 - One request handled at a time, on the calling thread — no concurrency.

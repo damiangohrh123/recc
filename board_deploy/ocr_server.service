@@ -1,0 +1,16 @@
+[Unit]
+Description=RECC OCR Server (Internal OCR API)
+After=network.target
+
+[Service]
+Type=simple
+User=tpsadmin
+WorkingDirectory=/home/tpsadmin/board_deploy
+ExecStart=/home/tpsadmin/board_deploy/ocr_server /home/tpsadmin/model/PP-OCRv6_tiny_det_rk3588.rknn /home/tpsadmin/model/PP-OCRv6_tiny_rec_rk3588.rknn /home/tpsadmin/model/ppocr_keys_v6.txt 8080
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/tpsadmin/board_deploy/ocr_server.log
+StandardError=append:/home/tpsadmin/board_deploy/ocr_server.log
+
+[Install]
+WantedBy=multi-user.target
