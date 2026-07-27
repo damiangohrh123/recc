@@ -7,7 +7,7 @@ PP-OCRv6 tiny detection and recognition on the Rockchip RK3588 NPU via RKNN, rea
 | Det | PP-OCRv6 tiny det | INT8, 480×480 | ImageNet norm baked in; raw BGR in |
 | Rec | PP-OCRv6 tiny rec | FP16, 320×48 | `[0,1]` normalisation |
 
-Detection runs a full-image pass plus a grid of overlapping tiles sized to the detector's native 480x480 input, covering the whole image at full resolution regardless of aspect ratio. Alarm detection converts the frame to HSV, masks for red, and filters by area, aspect ratio, and screen position; if a banner is found, it reuses the OCR text already collected for that region instead of running a second pass. Detection has no preprocessing step (no binarization, no upscaling); the model performs best on unprocessed input.
+Detection runs a single full-image pass at the detector's native 480x480 input. Alarm detection converts the frame to HSV, masks for red, and filters by area, aspect ratio, and screen position; if a banner is found, it reuses the OCR text already collected for that region instead of running a second pass. Detection has no preprocessing step (no binarization, no upscaling); the model performs best on unprocessed input.
 
 ## Directory Structure
 
@@ -18,7 +18,7 @@ recc/
       benchmark.cpp                # one-shot CLI tool; also reports timing/CPU/memory with cycles > 1
       ppocr_det.cpp/h              # detection
       ppocr_rec.cpp/h              # recognition
-      ppocr_system.cpp/h           # det + rec pipeline, tiling, NMS
+      ppocr_system.cpp/h           # det + rec pipeline, NMS
       alarm_detector.cpp/h         # HSV-based alarm banner detection
       text_correction.cpp/h        # narrow post-processing fix for two known recognition mistakes
       rknn_executor.cpp/h          # low-level RKNN model runner

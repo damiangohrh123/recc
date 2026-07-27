@@ -36,10 +36,6 @@ cv::Mat get_rotate_crop_image(const cv::Mat& img, const Quad& box);
 // Top-to-bottom, then left-to-right within a row (~10px row tolerance).
 std::vector<Quad> sorted_boxes(std::vector<Quad> dt_boxes);
 
-// Runs the detector on the full image, then on a grid of overlapping
-// tiles sized to its native 480x480 input, merging all detected boxes.
-std::vector<Quad> run_det_tiled(const cv::Mat& img_det, const TextDetector& detector, int overlap = 256);
-
 // Ties detection and recognition together into the full per-image pipeline.
 class TextSystem {
 public:
@@ -48,11 +44,7 @@ public:
 
 	// Detects, crops, and recognizes all text in one image. If timing is
 	// non-null, fills it in with a det/rec stage breakdown for this call.
-	// use_tiling controls whether detection also runs on a grid of
-	// overlapping tiles (see run_det_tiled() above) in addition to the
-	// full-image pass; set false to measure a single full-image detection
-	// pass only.
-	std::vector<OcrResult> run(const cv::Mat& img, RunTiming* timing = nullptr, bool use_tiling = true) const;
+	std::vector<OcrResult> run(const cv::Mat& img, RunTiming* timing = nullptr) const;
 
 private:
 	TextDetector detector_;      // finds text-box quads in an image

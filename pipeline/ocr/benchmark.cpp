@@ -107,7 +107,7 @@ struct CycleTotals {
 // AlarmDetector::detect() calls ocr_server.cpp uses, timing each stage and
 // sampling CPU/memory each cycle.
 CycleTotals run_cycles(const cv::Mat& img_orig, const TextSystem& text_system,
-                        const AlarmDetector& alarm_detector, int cycles, bool use_tiling) {
+                        const AlarmDetector& alarm_detector, int cycles) {
     const unsigned int nproc = std::max(1u, std::thread::hardware_concurrency());
 
     CycleTotals totals;
@@ -119,7 +119,7 @@ CycleTotals run_cycles(const cv::Mat& img_orig, const TextSystem& text_system,
         auto wall_start = std::chrono::steady_clock::now();
 
         RunTiming run_timing;
-        std::vector<OcrResult> results = text_system.run(img_orig, &run_timing, use_tiling);
+        std::vector<OcrResult> results = text_system.run(img_orig, &run_timing);
 
         auto alarm_start = std::chrono::steady_clock::now();
         AlarmResult alarm = alarm_detector.detect(img_orig, results);
@@ -157,39 +157,25 @@ CycleTotals run_cycles(const cv::Mat& img_orig, const TextSystem& text_system,
 }
 
 int main(int argc, char** argv) {
-    // Pulls --no-tiling out of the argument list wherever it appears, so
-    // the rest of the arguments stay purely positional.
-    std::vector<std::string> args;
-    bool use_tiling = true;
-    for (int i = 1; i < argc; ++i) {
-        std::string a = argv[i];
-        if (a == "--no-tiling") {
-            use_tiling = false;
-        } else {
-            args.push_back(std::move(a));
-        }
-    }
-
-    if (args.size() < 4) {
+    if (argc < 5) {
         fprintf(stderr,
                 "usage: %s <det_model.rknn> <rec_model.rknn> <char_dict.txt> <image.jpg> "
-                "[cycles=1] [drop_score=0.4] [--no-tiling]\n",
+                "[cycles=1] [drop_score=0.4]\n",
                 argv[0]);
         return 1;
     }
-    const std::string det_model_path = args[0];
-    const std::string rec_model_path = args[1];
-    const std::string char_dict_path = args[2];
-    const std::string image_path = args[3];
-    const int cycles = args.size() > 4 ? std::atoi(args[4].c_str()) : 1;
-    const double drop_score = args.size() > 5 ? std::atof(args[5].c_str()) : 0.4;
+    const std::string det_model_path = argv[1];
+    const std::string rec_model_path = argv[2];
+    const std::string char_dict_path = argv[3];
+    const std::string image_path = argv[4];
+    const int cycles = argc > 5 ? std::atoi(argv[5]) : 1;
+    const double drop_score = argc > 6 ? std::atof(argv[6]) : 0.4;
 
     printf("\n  OCR Benchmark  (%d cycle%s)\n", cycles, cycles == 1 ? "" : "s");
     printf("  Image      : %s\n", image_path.c_str());
     printf("  Det model  : %s\n", det_model_path.c_str());
     printf("  Rec model  : %s\n", rec_model_path.c_str());
     printf("  Drop score : %.2f\n", drop_score);
-    printf("  Tiling     : %s\n", use_tiling ? "on" : "off");
     printf("--\n");
 
     auto load_start = std::chrono::steady_clock::now();
@@ -225,7 +211,7 @@ int main(int argc, char** argv) {
     printf("Models loaded.\n");
 
     printf("\nRunning %d cycle%s...\n", cycles, cycles == 1 ? "" : "s");
-    CycleTotals totals = run_cycles(img, text_system, alarm_detector, cycles, use_tiling);
+    CycleTotals totals = run_cycles(img, text_system, alarm_detector, cycles);
 
     double avg_ms = mean(totals.times_ms);
     double std_ms = stddev(totals.times_ms);
