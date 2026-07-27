@@ -29,8 +29,10 @@ recc/
                                     # (simpler than the goal/step closed loop design, see README below)
   api/                             # Internal OCR API (ocr_server + minimal HTTP layer, see README below)
   third_party/                     # RKNN SDK headers + librknnrt.so
-  aarch64-ubuntu20.04-toolchain.tar.gz  # cached aarch64 cross-compile toolchain, see README below
-  board_deploy/                    # built binaries + sample images + systemd service, ready to pscp to a board
+  aarch64-ubuntu20.04-toolchain.tar.gz  # cached aarch64 cross-compile toolchain (gitignored), see README below
+  board_deploy/                    # sample images + systemd service, ready to pscp to a board
+                                    # (benchmark/ocr_server/automation_runner are gitignored build
+                                    # outputs -- build them first, see "Setup" below)
   model/
     PP-OCRv6_tiny_det.onnx         # conversion source
     PP-OCRv6_tiny_rec.onnx         # conversion source
@@ -43,7 +45,9 @@ recc/
 
 ### Building the Binaries
 
-`board_deploy/benchmark` and `board_deploy/ocr_server` are pre-built aarch64 binaries, cross-compiled for the RK3588 board and statically linked against OpenCV 4.5.4 (core+imgproc only), Clipper/polyclipping, and zlib. The only runtime dependency either needs beyond standard libc/libm/libpthread is `librknnrt.so`, already provided by the board at `/usr/lib`. Rebuilding is only needed if the C++ source changes.
+`board_deploy/benchmark` and `board_deploy/ocr_server` are aarch64 binaries, cross-compiled for the RK3588 board and statically linked against OpenCV 4.5.4 (core+imgproc only), Clipper/polyclipping, and zlib. The only runtime dependency either needs beyond standard libc/libm/libpthread is `librknnrt.so`, already provided by the board at `/usr/lib`.
+
+These binaries are gitignored, not committed, since rebuilding them on every source change would otherwise bloat git history with binary blobs. A fresh clone of this repo won't have them; build them once using the steps below, then only rebuild again if the C++ source changes.
 
 Rebuilding needs an aarch64 gcc-9 toolchain matching the board's Ubuntu 20.04/glibc 2.31, plus statically-built OpenCV/Clipper/zlib for aarch64. That environment is cached in `aarch64-ubuntu20.04-toolchain.tar.gz` (repo root) so a rebuild skips the ~20+ minute bootstrap:
 
