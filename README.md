@@ -172,12 +172,6 @@ sudo systemctl status ocr_server --no-pager
 journalctl -u ocr_server -f
 ```
 
-After re-uploading a rebuilt binary, restart the service instead of running it manually:
-
-```bash
-sudo systemctl restart ocr_server
-```
-
 ### Current Limitations
 
 - One request handled at a time, on the calling thread; no concurrency.
