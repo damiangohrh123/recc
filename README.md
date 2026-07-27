@@ -1,13 +1,13 @@
-# OCR Pipeline — RK3588 (RECC)
+# OCR Pipeline (RK3588 / RECC)
 
-PP-OCRv6 tiny detection + recognition running on the Rockchip RK3588 NPU via RKNN, reading text off machine HMI screens, with alarm-banner detection built on top of the raw OCR output. This repo covers the production C++ implementation. Input is raw BGR888 only, everywhere in this pipeline, since uncompressed pixel data preserves the small text these HMI screens have.
+PP-OCRv6 tiny detection and recognition on the Rockchip RK3588 NPU via RKNN, reading text off machine HMI screens, with alarm-banner detection on top of the raw OCR output. This repo covers the production C++ implementation. Input is raw BGR888 only, since uncompressed pixel data preserves small text better.
 
 | Component | Model | Format | Notes |
 |-----------|-------|--------|-------|
 | Det | PP-OCRv6 tiny det | INT8, 480×480 | ImageNet norm baked in; raw BGR in |
 | Rec | PP-OCRv6 tiny rec | FP16, 320×48 | `[0,1]` normalisation |
 
-Detection always runs a full-image "squash" pass, plus a grid of overlapping tiles sized to the detector's native 480x480 input, covering the whole image regardless of its aspect ratio — this avoids the resolution loss that comes from downscaling a much larger image straight to 480x480 in one shot. Alarm detection converts the frame to HSV, masks for red, and filters by area/aspect-ratio/screen-position to find alarm banners; if one is found, the OCR text already collected for that region is returned immediately without a second inference pass. Detection has no image preprocessing step (no binarization, no upscaling) — the deployed detection model performs best on unprocessed input.
+Detection runs a full-image pass plus a grid of overlapping tiles sized to the detector's native 480x480 input, covering the whole image at full resolution regardless of aspect ratio. Alarm detection converts the frame to HSV, masks for red, and filters by area, aspect ratio, and screen position; if a banner is found, it reuses the OCR text already collected for that region instead of running a second pass. Detection has no preprocessing step (no binarization, no upscaling); the model performs best on unprocessed input.
 
 ## Directory Structure
 
@@ -41,13 +41,13 @@ recc/
 
 ## Build
 
-`board_deploy/benchmark` and `board_deploy/ocr_server` are pre-built, ready-to-run aarch64 binaries — cross-compiled for the RK3588 board and statically linked against OpenCV 4.5.4 (core+imgproc only), Clipper/polyclipping, and zlib. The only runtime dependency either pulls in besides standard libc/libm/libpthread is `librknnrt.so`, which the board already provides at `/usr/lib`.
+`board_deploy/benchmark` and `board_deploy/ocr_server` are pre-built aarch64 binaries, cross-compiled for the RK3588 board and statically linked against OpenCV 4.5.4 (core+imgproc only), Clipper/polyclipping, and zlib. The only runtime dependency either needs beyond standard libc/libm/libpthread is `librknnrt.so`, already provided by the board at `/usr/lib`.
 
 Rebuilding needs an aarch64 gcc-9 toolchain matching the board's Ubuntu 20.04/glibc 2.31, plus statically-built OpenCV/Clipper/zlib for aarch64. That environment is cached in `aarch64-ubuntu20.04-toolchain.tar.gz` (repo root) so a rebuild skips the ~20+ minute bootstrap:
 
 1. Extract: `tar xzf aarch64-ubuntu20.04-toolchain.tar.gz -C ~` (creates `~/cross`, `~/cross20`, `~/deps-arm64`, `~/rknn-arm64`, `~/fix_toolchain_paths.sh`).
-2. Run `bash ~/fix_toolchain_paths.sh` once, right after extracting — rewrites absolute paths baked into the archive to the current `$HOME`. Safe to re-run.
-3. Build wrapper compilers pointing `-B` at `~/cross/usr/aarch64-linux-gnu/bin` (target binutils) and `~/cross20/usr/bin` (gcc-9 frontend) — see `~/cross20/wrap/aarch64-linux-gnu-g++` inside the archive for the exact form.
+2. Run `bash ~/fix_toolchain_paths.sh` once, right after extracting, to rewrite absolute paths baked into the archive to the current `$HOME`. Safe to re-run.
+3. Build wrapper compilers pointing `-B` at `~/cross/usr/aarch64-linux-gnu/bin` (target binutils) and `~/cross20/usr/bin` (gcc-9 frontend); see `~/cross20/wrap/aarch64-linux-gnu-g++` inside the archive for the exact form.
 4. Set `LD_LIBRARY_PATH` to include `~/cross20/usr/lib/x86_64-linux-gnu` and `~/cross/usr/lib/x86_64-linux-gnu`.
 5. Configure with `-DCMAKE_TOOLCHAIN_FILE=...` using those wrapper compilers, plus `-DOPENCV_INCLUDE_DIR=~/deps-arm64/include/opencv4`, `-DOPENCV_LIB_DIR=~/deps-arm64/lib`, `-DCLIPPER_INCLUDE_DIR=~/deps-arm64/include`, `-DCLIPPER_LIB_DIR=~/deps-arm64/lib`, `-DZLIB_LIB_DIR=~/deps-arm64/lib`, `-DRKNN_SDK_LIB_DIR=~/rknn-arm64/lib`, `-DBUILD_TOOLS=ON`.
 
@@ -59,7 +59,7 @@ cmake .. -DOPENCV_INCLUDE_DIR=... -DOPENCV_LIB_DIR=... -DCLIPPER_INCLUDE_DIR=...
 make
 ```
 
-`BUILD_TOOLS=ON` builds both `benchmark` and `ocr_server`; both require `RKNN_SDK_LIB_DIR` pointing at a real `librknnrt.so`, since they link the actual board runtime.
+`BUILD_TOOLS=ON` builds both `benchmark` and `ocr_server`; both need `RKNN_SDK_LIB_DIR` pointing at a real `librknnrt.so`, since they link the actual board runtime.
 
 After a rebuild, re-upload from Windows/WSL:
 
@@ -97,7 +97,7 @@ Request body: an 8-byte header followed by tightly-packed pixel data, no padding
 [width * height * 3 bytes: BGR888 pixel data, row-major, 3 bytes/pixel]
 ```
 
-Same byte order kvmd's own raw channel already uses for its width/height/size fields, so a client that already speaks that protocol (e.g. `recc_gen5_test_kit/test_ocr_continuous.py`) doesn't need a second convention to talk to this endpoint.
+Same byte order kvmd's own raw channel uses for its width/height/size fields, so a client that already speaks that protocol (e.g. `recc_gen5_test_kit/test_ocr_continuous.py`) needs no second convention to talk to this endpoint.
 
 Response `200`:
 
@@ -115,9 +115,9 @@ Response `200`:
 }
 ```
 
-`alarm` is always present; `bbox`/`text` inside it are only present when `detected` is `true`. `boxes` is the same per-box text/score/quad data `benchmark` prints, just serialized as JSON.
+`alarm` is always present; `bbox`/`text` inside it only appear when `detected` is `true`. `boxes` is the same per-box text/score/quad data `benchmark` prints, just serialized as JSON.
 
-Response `400` if the body is too short, or its size doesn't match `8 + width*height*3` for the width/height given in the header: `{"error": "..."}` describing the mismatch.
+Response `400` if the body is too short, or its size doesn't match `8 + width*height*3` for the given width/height: `{"error": "..."}` describing the mismatch.
 
 ### Running It
 
@@ -130,7 +130,7 @@ cd ~/board_deploy
 python3 -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8080/health').read())"
 ```
 
-`/ocr` needs the 8-byte width/height header prepended before the pixel bytes, so it isn't a plain `curl --data-binary @file` call — see `recc_gen5_test_kit/test_ocr_continuous.py` for a working example that builds this request correctly.
+`/ocr` needs the 8-byte width/height header prepended before the pixel bytes, so it isn't a plain `curl --data-binary @file` call. See `recc_gen5_test_kit/test_ocr_continuous.py` for a working example that builds this request correctly.
 
 ### Running as a Service (Survives Reboot)
 
@@ -158,9 +158,9 @@ sudo systemctl restart ocr_server
 
 ### Current Limitations
 
-- One request handled at a time, on the calling thread — no concurrency.
-- No keep-alive, chunked encoding, or HTTPS — every request opens a new connection.
-- No authentication — anyone who can reach the port can call it.
+- One request handled at a time, on the calling thread; no concurrency.
+- No keep-alive, chunked encoding, or HTTPS; every request opens a new connection.
+- No authentication; anyone who can reach the port can call it.
 - The HTTP layer (`http_server.h/.cpp`) is a small implementation over POSIX sockets, not a vendored library.
 
 ## Setting Up a New Board
@@ -174,24 +174,24 @@ sudo systemctl restart ocr_server
 
    `librknnrt.so` should already be present at `/usr/lib` as part of the board's own OS image.
 
-2. Test manually first, before wiring anything into systemd: run `ocr_server` by hand (see "Running It" above) and confirm `/health` responds, or run `benchmark` against one of the `testdata/*.bgr888` files. This catches a wrong path or missing model file while you're watching it directly, rather than inside a service that silently retries.
+2. Test manually first, before wiring anything into systemd: run `ocr_server` by hand (see "Running It" above) and confirm `/health` responds, or run `benchmark` against one of the `testdata/*.bgr888` files. This catches a wrong path or missing model file while you're watching it directly, instead of inside a service that silently retries.
 
 3. Once that works, install it as a service (see "Running as a Service" above) so it starts automatically on every boot and restarts itself if it crashes.
 
-4. Note this board's IP address wherever it needs to be reachable from (e.g. the Host Application). `ocr_server`, the models, and the service file are identical across every board — only the IP differs.
+4. Note this board's IP address wherever it needs to be reachable from (e.g. the Host Application). `ocr_server`, the models, and the service file are identical across every board; only the IP differs.
 
 ## Rule-Based Automation (Prototype)
 
-`pipeline/automation/` matches a person-written rule (a keyword to look for and what to do once found) against one saved OCR result, via fuzzy keyword matching, and prints the resulting KVM action sequence for a person to approve. It never touches an image, only the text and coordinates OCR already produced, so unlike everything else in `pipeline/`, it has no OpenCV/RKNN dependency and isn't gated behind `BUILD_TOOLS` or a cross-compile toolchain — it builds and runs on any machine with a C++17 compiler:
+`pipeline/automation/` matches a person-written rule (a keyword to look for and what to do once found) against one saved OCR result, via fuzzy keyword matching, and prints the resulting KVM action sequence for a person to approve. It never touches an image, only the text and coordinates OCR already produced, so unlike everything else in `pipeline/`, it has no OpenCV/RKNN dependency and isn't gated behind `BUILD_TOOLS` or a cross-compile toolchain. It builds and runs on any machine with a C++17 compiler:
 
 ```bash
 g++ -std=c++17 -O2 -I. pipeline/automation/*.cpp -o automation_runner
 ./automation_runner
 ```
 
-It reads every rule from `rules/` and every real OCR result from `ocr_output/` (both plain JSON files, see `pipeline/automation/rule.h` and `pipeline/automation/screens.h` for the shapes), and matches each rule against each screen. Nothing is sent to a machine — the resulting sequence is printed and waits for a person to approve it.
+It reads every rule from `rules/` and every real OCR result from `ocr_output/` (both plain JSON files; see `pipeline/automation/rule.h` and `pipeline/automation/screens.h` for the shapes), and matches each rule against each screen. Nothing is sent to a machine; the resulting sequence is printed and waits for a person to approve it.
 
-This is a prototype of the fuller goal/step design described in `AI_automation_pipeline.docx` (Section 2), not a complete implementation of it: a rule here is a flat list of `{keyword, action, value}` steps, checked once against one already-saved screen, rather than the closed loop that design calls for — re-reading the screen via OCR after every action, retrying on a mismatch, and running live against a real KVM connection. Section 2.4 of that document lists exactly what's left to build to close that gap.
+This is a prototype of the fuller goal/step design described in `AI_automation_pipeline.docx` (Section 2), not a complete implementation of it: a rule here is a flat list of `{keyword, action, value}` steps, checked once against one already-saved screen, rather than the closed loop that design calls for (re-reading the screen via OCR after every action, retrying on a mismatch, and running live against a real KVM connection). Section 2.4 of that document lists what's left to build to close that gap.
 
 ## Environment
 
