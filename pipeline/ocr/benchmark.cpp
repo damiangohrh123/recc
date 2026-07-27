@@ -1,15 +1,10 @@
 // Runs the OCR + alarm-detection pipeline (TextSystem::run + AlarmDetector)
 // on one image N times, timing det/rec/alarm separately, plus CPU, memory,
-// and recognized text. Previously reimplemented the detection/recognition
-// assembly steps inline instead of calling TextSystem::run() -- that copy
-// had drifted from the real pipeline (missing the small-image whole-frame
-// fallback and the drop_score filter it applies to its own results) and
-// never ran alarm detection at all. Now calls the same shared pipeline code
-// ocr_server.cpp uses, so there's one implementation instead of two.
-//
-// With cycles=1 this also replaces the old single-shot `ocr` CLI tool
-// (main.cpp, removed): same detection/recognition/alarm output, plus
-// timing/CPU/memory stats `ocr` never had.
+// and recognized text. Calls the same shared pipeline code ocr_server.cpp
+// uses, so there's one implementation of detection/recognition/alarm
+// assembly, not a separate copy. With cycles=1 this doubles as a single-shot
+// CLI tool: prints the same detection/recognition/alarm output plus
+// timing/CPU/memory stats.
 #include <algorithm>
 #include <chrono>
 #include <cmath>

@@ -10,7 +10,7 @@ set(CLIPPER_INCLUDE_DIR "" CACHE PATH "Directory containing polyclipping/clipper
 set(CLIPPER_LIB_DIR     "" CACHE PATH "Directory containing libpolyclipping.so")
 set(ZLIB_LIB_DIR        "" CACHE PATH "Directory containing libz (needed by opencv_core's persistence/FileStorage code even without imgcodecs)")
 
-set(RKNN_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/rknn" CACHE PATH "Directory containing rknn_api.h")
+set(RKNN_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party" CACHE PATH "Directory containing rknn_api.h")
 set(RKNN_SDK_LIB_DIR    "" CACHE PATH "Directory containing librknnrt.so (board SDK only)")
 
 include_directories(
@@ -63,11 +63,11 @@ if(RKNN_SDK_LIB_DIR)
     target_link_libraries(ocr_core PUBLIC rknnrt)
 endif()
 
-# Builds an executable that links ocr_core and decodes images via stb_image
-# (benchmark.cpp fits this shape).
+# Builds an executable that links ocr_core and loads raw .bgr888 images
+# (benchmark.cpp fits this shape). No stb_image/JPEG-PNG decode anymore --
+# this pipeline is raw BGR888 only (see pipeline/ocr/image_io.cpp).
 function(add_ocr_tool name source)
-    add_executable(${name} ${source} pipeline/ocr/image_io.cpp third_party/stb/stb_image_impl.cpp)
-    target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
+    add_executable(${name} ${source} pipeline/ocr/image_io.cpp)
     target_link_libraries(${name} PRIVATE ocr_core)
     # librknnrt.so itself dynamically depends on the system's own
     # libstdc++.so.6 at runtime (independent of ours being statically
@@ -108,10 +108,7 @@ if(BUILD_TOOLS)
         api/ocr_server.cpp
         api/http_server.cpp
         api/json_write.cpp
-        pipeline/ocr/image_io.cpp
-        third_party/stb/stb_image_impl.cpp
     )
-    target_include_directories(ocr_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
     target_link_libraries(ocr_server PRIVATE ocr_core)
     target_link_options(ocr_server PRIVATE -Wl,--allow-shlib-undefined)
 endif()

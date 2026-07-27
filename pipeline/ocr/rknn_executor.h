@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-// Thin C++ wrapper around librknnrt's C API (third_party/rknn/rknn_api.h).
+// Thin C++ wrapper around librknnrt's C API (third_party/rknn_api.h).
 // Port of python/rknn_executor.py.
 
 // One model output: dequantized float data plus its tensor shape (the C API

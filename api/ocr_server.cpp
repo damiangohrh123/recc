@@ -3,6 +3,7 @@
 // See the "Internal OCR API" section of the top-level README.md for the
 // request/response contract this implements.
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <sstream>
@@ -14,7 +15,6 @@
 #include "pipeline/ocr/ppocr_det.h"
 #include "pipeline/ocr/ppocr_rec.h"
 #include "pipeline/ocr/ppocr_system.h"
-#include "pipeline/ocr/image_io.h"
 
 namespace {
 
@@ -50,6 +50,30 @@ std::string results_to_json(const std::vector<OcrResult>& results, const AlarmRe
     }
     out << "}," << "\"timing_ms\":" << timing_ms << "}";
     return out.str();
+}
+
+// Runs the OCR + alarm-detection pipeline on an already-decoded BGR cv::Mat
+// and times it. Only caller is /ocr, which builds the Mat directly over
+// raw BGR888 bytes -- no JPEG/PNG decode step anywhere in this server, raw
+// BGR888 is the only input format the pipeline accepts.
+HttpResponse run_ocr(TextSystem& text_system, AlarmDetector& alarm_detector, const cv::Mat& img) {
+    HttpResponse res;
+    auto t0 = std::chrono::steady_clock::now();
+    std::vector<OcrResult> results = text_system.run(img);
+    AlarmResult alarm = alarm_detector.detect(img, results);
+    auto t1 = std::chrono::steady_clock::now();
+    double timing_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+    res.body = results_to_json(results, alarm, timing_ms);
+    return res;
+}
+
+// Reads a big-endian uint32 out of a 4-byte buffer -- matches the byte order
+// kvmd's own raw channel already uses for its width/height/size fields (see
+// test_capture_and_ocr_compare.py's struct.pack('>HHHH', ...)), so a client
+// that already speaks kvmd's raw protocol doesn't need a second convention.
+uint32_t read_u32_be(const unsigned char* p) {
+    return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | uint32_t(p[3]);
 }
 
 }  // namespace
@@ -95,24 +119,52 @@ int main(int argc, char** argv) {
         return res;
     });
 
+    // Raw BGR888 input only -- no JPEG/PNG decode step anywhere in this
+    // server (JPEG artifacts can distort small text -- see image_io.h).
+    // Body layout: 4-byte big-endian width, 4-byte big-endian height, then
+    // exactly width*height*3 bytes of tightly-packed BGR888 (no padding, no
+    // per-row stride gap -- same layout kvmd's raw channel already
+    // produces).
     server.on("POST", "/ocr", [&](const HttpRequest& req) {
-        HttpResponse res;
-        cv::Mat img = decode_image_from_memory(
-            reinterpret_cast<const unsigned char*>(req.body.data()), req.body.size());
-        if (img.empty()) {
+        if (req.body.size() < 8) {
+            HttpResponse res;
             res.status = 400;
-            res.body = "{\"error\":\"could not decode image\"}";
+            res.body = "{\"error\":\"body too short for width/height header\"}";
+            return res;
+        }
+        const unsigned char* bytes = reinterpret_cast<const unsigned char*>(req.body.data());
+        const uint32_t width = read_u32_be(bytes);
+        const uint32_t height = read_u32_be(bytes + 4);
+        // Sanity cap well above any real capture resolution, so a garbled
+        // header can't make the size_t multiplication below wrap around
+        // and slip past the body-size check.
+        constexpr uint32_t kMaxDimension = 16384;
+
+        if (width == 0 || height == 0 || width > kMaxDimension || height > kMaxDimension) {
+            HttpResponse res;
+            res.status = 400;
+            res.body = "{\"error\":\"width/height missing or out of range\"}";
             return res;
         }
 
-        auto t0 = std::chrono::steady_clock::now();
-        std::vector<OcrResult> results = text_system.run(img);
-        AlarmResult alarm = alarm_detector.detect(img, results);
-        auto t1 = std::chrono::steady_clock::now();
-        double timing_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        const size_t expected_size = size_t(8) + size_t(width) * size_t(height) * 3;
+        if (req.body.size() != expected_size) {
+            HttpResponse res;
+            res.status = 400;
+            std::ostringstream msg;
+            msg << "{\"error\":\"body size " << req.body.size() << " does not match 8 + width*height*3 "
+                << "for width=" << width << " height=" << height << " (expected " << expected_size << ")\"}";
+            res.status = 400;
+            res.body = msg.str();
+            return res;
+        }
 
-        res.body = results_to_json(results, alarm, timing_ms);
-        return res;
+        // Own a copy of the pixel bytes: req.body (and therefore `bytes`)
+        // only lives for the duration of this handler call, but cv::Mat's
+        // pointer constructor doesn't copy by default.
+        cv::Mat img(int(height), int(width), CV_8UC3, const_cast<unsigned char*>(bytes + 8));
+        img = img.clone();
+        return run_ocr(text_system, alarm_detector, img);
     });
 
     server.run();

@@ -1,6 +1,6 @@
 #include "rknn_executor.h"
 
-#include "third_party/rknn/rknn_api.h"
+#include "third_party/rknn_api.h"
 
 #include <algorithm>
 #include <cstdio>

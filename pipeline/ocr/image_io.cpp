@@ -1,8 +1,6 @@
 #include "image_io.h"
 #include <cstdio>
 #include <fstream>
-#include <opencv2/imgproc.hpp>
-#include "stb_image.h"
 
 namespace {
 
@@ -54,36 +52,12 @@ cv::Mat load_raw_bgr888(const std::string& path) {
 	return img;
 }
 
-// Decodes an image file to BGR; returns an empty Mat on failure.
+// Loads a ".bgr888" file; any other extension returns an empty Mat.
 cv::Mat load_image(const std::string& path) {
 	if (ends_with(path, ".bgr888")) {
 		return load_raw_bgr888(path);
 	}
-	int width = 0, height = 0, channels_in_file = 0;
-	unsigned char* rgb = stbi_load(path.c_str(), &width, &height, &channels_in_file, /*desired_channels=*/3);
-	if (!rgb) {
-		fprintf(stderr, "failed to decode %s: %s\n", path.c_str(), stbi_failure_reason());
-		return cv::Mat();
-	}
-	cv::Mat rgb_mat(height, width, CV_8UC3, rgb);
-	cv::Mat bgr_mat;
-	cv::cvtColor(rgb_mat, bgr_mat, cv::COLOR_RGB2BGR);
-	stbi_image_free(rgb);
-	return bgr_mat;
-}
-
-// Decodes an in-memory image buffer to BGR; returns an empty Mat on failure.
-cv::Mat decode_image_from_memory(const unsigned char* data, size_t len) {
-	int width = 0, height = 0, channels_in_file = 0;
-	unsigned char* rgb = stbi_load_from_memory(data, static_cast<int>(len), &width, &height,
-		&channels_in_file, /*desired_channels=*/3);
-	if (!rgb) {
-		fprintf(stderr, "failed to decode in-memory image: %s\n", stbi_failure_reason());
-		return cv::Mat();
-	}
-	cv::Mat rgb_mat(height, width, CV_8UC3, rgb);
-	cv::Mat bgr_mat;
-	cv::cvtColor(rgb_mat, bgr_mat, cv::COLOR_RGB2BGR);
-	stbi_image_free(rgb);
-	return bgr_mat;
+	fprintf(stderr, "failed to load %s: only raw \"..._<width>x<height>.bgr888\" files "
+		"are supported\n", path.c_str());
+	return cv::Mat();
 }
