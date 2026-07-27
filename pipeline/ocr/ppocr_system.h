@@ -48,7 +48,11 @@ public:
 
 	// Detects, crops, and recognizes all text in one image. If timing is
 	// non-null, fills it in with a det/rec stage breakdown for this call.
-	std::vector<OcrResult> run(const cv::Mat& img, RunTiming* timing = nullptr) const;
+	// use_tiling controls whether detection also runs on a grid of
+	// overlapping tiles (see run_det_tiled() above) in addition to the
+	// full-image pass; set false to measure a single full-image detection
+	// pass only.
+	std::vector<OcrResult> run(const cv::Mat& img, RunTiming* timing = nullptr, bool use_tiling = true) const;
 
 private:
 	TextDetector detector_;      // finds text-box quads in an image

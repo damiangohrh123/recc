@@ -189,7 +189,7 @@ namespace {
 
 // Full pipeline for one image: find text boxes, crop each one out straight,
 // read the text in each crop, and return only the results we're confident in.
-std::vector<OcrResult> TextSystem::run(const cv::Mat& img, RunTiming* timing) const {
+std::vector<OcrResult> TextSystem::run(const cv::Mat& img, RunTiming* timing, bool use_tiling) const {
 	std::vector<Quad> dt_boxes;
 
 	// Skips detection on images smaller than 80x400; falls through to the
@@ -197,7 +197,7 @@ std::vector<OcrResult> TextSystem::run(const cv::Mat& img, RunTiming* timing) co
 	// detection model ran.
 	if (img.rows >= 80 && img.cols >= 400) {
 		auto det_start = std::chrono::steady_clock::now();
-		std::vector<Quad> raw_boxes = run_det_tiled(img, detector_);
+		std::vector<Quad> raw_boxes = use_tiling ? run_det_tiled(img, detector_) : detector_.run(img);
 		if (timing) timing->det_ms = ms_since(det_start);
 
 		if (!raw_boxes.empty()) {
