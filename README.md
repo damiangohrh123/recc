@@ -39,9 +39,11 @@ recc/
     ppocr_keys_v6.txt              # character dictionary
 ```
 
-## Build
+## Setup
 
-`board_deploy/benchmark` and `board_deploy/ocr_server` are pre-built aarch64 binaries, cross-compiled for the RK3588 board and statically linked against OpenCV 4.5.4 (core+imgproc only), Clipper/polyclipping, and zlib. The only runtime dependency either needs beyond standard libc/libm/libpthread is `librknnrt.so`, already provided by the board at `/usr/lib`.
+### Building the Binaries
+
+`board_deploy/benchmark` and `board_deploy/ocr_server` are pre-built aarch64 binaries, cross-compiled for the RK3588 board and statically linked against OpenCV 4.5.4 (core+imgproc only), Clipper/polyclipping, and zlib. The only runtime dependency either needs beyond standard libc/libm/libpthread is `librknnrt.so`, already provided by the board at `/usr/lib`. Rebuilding is only needed if the C++ source changes.
 
 Rebuilding needs an aarch64 gcc-9 toolchain matching the board's Ubuntu 20.04/glibc 2.31, plus statically-built OpenCV/Clipper/zlib for aarch64. That environment is cached in `aarch64-ubuntu20.04-toolchain.tar.gz` (repo root) so a rebuild skips the ~20+ minute bootstrap:
 
@@ -61,12 +63,32 @@ make
 
 `BUILD_TOOLS=ON` builds both `benchmark` and `ocr_server`; both need `RKNN_SDK_LIB_DIR` pointing at a real `librknnrt.so`, since they link the actual board runtime.
 
-After a rebuild, re-upload from Windows/WSL:
+### Deploying to a Board
+
+New board:
+
+1. Copy the binaries and model files over (from Windows/WSL):
+
+   ```bash
+   pscp -r board_deploy tpsadmin@<board-ip>:/home/tpsadmin/board_deploy
+   pscp -r model tpsadmin@<board-ip>:/home/tpsadmin/model
+   ```
+
+   `librknnrt.so` should already be present at `/usr/lib` as part of the board's own OS image.
+
+2. Test manually first, before wiring anything into systemd: run `ocr_server` by hand (see "Running It" below) and confirm `/health` responds, or run `benchmark` against one of the `testdata/*.bgr888` files. This catches a wrong path or missing model file while you're watching it directly, instead of inside a service that silently retries.
+
+3. Install it as a service (see "Running as a Service" below) so it starts automatically on every boot and restarts itself if it crashes.
+
+4. Note this board's IP address wherever it needs to be reachable from (e.g. the Host Application). `ocr_server`, the models, and the service file are identical across every board; only the IP differs.
+
+Existing board, after a rebuild: re-upload just the changed binary and restart the service.
 
 ```bash
-pscp board_deploy/benchmark tpsadmin@192.168.1.101:/home/tpsadmin/board_deploy/benchmark
 pscp board_deploy/ocr_server tpsadmin@192.168.1.101:/home/tpsadmin/board_deploy/ocr_server
 ```
+
+Then on the board: `sudo systemctl restart ocr_server`.
 
 ## Running `benchmark`
 
@@ -162,23 +184,6 @@ sudo systemctl restart ocr_server
 - No keep-alive, chunked encoding, or HTTPS; every request opens a new connection.
 - No authentication; anyone who can reach the port can call it.
 - The HTTP layer (`http_server.h/.cpp`) is a small implementation over POSIX sockets, not a vendored library.
-
-## Setting Up a New Board
-
-1. Copy the binaries and model files over (from Windows/WSL):
-
-   ```bash
-   pscp -r board_deploy tpsadmin@<board-ip>:/home/tpsadmin/board_deploy
-   pscp -r model tpsadmin@<board-ip>:/home/tpsadmin/model
-   ```
-
-   `librknnrt.so` should already be present at `/usr/lib` as part of the board's own OS image.
-
-2. Test manually first, before wiring anything into systemd: run `ocr_server` by hand (see "Running It" above) and confirm `/health` responds, or run `benchmark` against one of the `testdata/*.bgr888` files. This catches a wrong path or missing model file while you're watching it directly, instead of inside a service that silently retries.
-
-3. Once that works, install it as a service (see "Running as a Service" above) so it starts automatically on every boot and restarts itself if it crashes.
-
-4. Note this board's IP address wherever it needs to be reachable from (e.g. the Host Application). `ocr_server`, the models, and the service file are identical across every board; only the IP differs.
 
 ## Rule-Based Automation (Prototype)
 
