@@ -1,6 +1,6 @@
 # OCR Pipeline — RK3588 (RECC)
 
-PP-OCRv6 tiny detection + recognition running on the Rockchip RK3588 NPU via RKNN, reading text off machine HMI screens, with alarm-banner detection built on top of the raw OCR output. This repo covers the production C++ implementation. Input is raw BGR888 only, everywhere in this pipeline — no JPEG/PNG decode anywhere, since compression artifacts can distort the small text these HMI screens have.
+PP-OCRv6 tiny detection + recognition running on the Rockchip RK3588 NPU via RKNN, reading text off machine HMI screens, with alarm-banner detection built on top of the raw OCR output. This repo covers the production C++ implementation. Input is raw BGR888 only, everywhere in this pipeline, since uncompressed pixel data preserves the small text these HMI screens have.
 
 | Component | Model | Format | Notes |
 |-----------|-------|--------|-------|
