@@ -160,7 +160,7 @@ python3 -c "import urllib.request; print(urllib.request.urlopen('http://localhos
 
 ### Running as a Service (Survives Reboot)
 
-`board_deploy/ocr_server.service` is a systemd unit that starts `ocr_server` on boot and restarts it automatically if it crashes, the same way `kvmd_run.sh` already behaves.
+`board_deploy/ocr_server.service` is a systemd unit that starts `ocr_server` on boot and restarts it automatically if it crashes. `kvmd` has no equivalent yet, it's just backgrounded once by `kvmd_run.sh` with no restart-on-crash supervision; giving it the same systemd treatment is a future improvement.
 
 ```bash
 sudo cp ~/board_deploy/ocr_server.service /etc/systemd/system/ocr_server.service
