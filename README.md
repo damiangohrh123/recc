@@ -7,7 +7,7 @@ PP-OCRv6 tiny detection and recognition on the Rockchip RK3588 NPU via RKNN, rea
 | Det | PP-OCRv6 tiny det | INT8, 480×480 | ImageNet norm baked in; raw BGR in |
 | Rec | PP-OCRv6 tiny rec | FP16, 320×48 | `[0,1]` normalisation |
 
-Detection runs a single full-image pass at the detector's native 480x480 input. Alarm detection converts the frame to HSV, masks for red, and filters by area, aspect ratio, and screen position; if a banner is found, it reuses the OCR text already collected for that region instead of running a second pass. Detection has no preprocessing step (no binarization, no upscaling); the model performs best on unprocessed input.
+Detection runs a single full-image pass at the detector's native 480x480 input. Alarm detection converts the frame to HSV, masks for red, and filters by area, aspect ratio, and screen position; if a banner is found, it reuses the OCR text already collected for that region instead of running a second pass. Preprocessing (binarization, upscaling) was tested for detection and dropped: it made results worse, so detection runs on unprocessed input.
 
 ## System Architecture
 
@@ -18,18 +18,19 @@ Two independent services run on the board and never talk to each other directly:
 - **`kvmd`** captures the HDMI input from the screen. It is a separate binary from this repo (not built here). Over a TCP socket on port 39000, it serves a continuous H.264 stream for live viewing, and a one-shot raw BGR888 frame on request. It has no knowledge of OCR.
 - **`ocr_server`** (this repo) reads one frame at a time. It has no knowledge of `kvmd`; it only accepts raw BGR888 bytes over HTTP on port 8080 and returns text and alarm results.
 
-A client (a host PC, or a test script such as `recc_gen5_test_kit/test_ocr_continuous.py`) drives both: it requests one frame from `kvmd`, then sends those bytes to `ocr_server`. Read frequency is controlled entirely by that client; neither service polls or pushes on a schedule of its own.
+A driving script, running locally on the board (e.g. `recc_gen5_test_kit/test_ocr_continuous.py` over SSH), calls both: it requests one frame from `kvmd`, then sends those bytes to `ocr_server`, both over localhost. The raw frame never leaves the board. Only the small JSON result is compact enough to be worth sending onward over the network, to a separate host PC. Read frequency is controlled entirely by whatever calls `kvmd` and `ocr_server`; neither service polls or pushes on a schedule of its own.
 
 ```mermaid
 flowchart LR
     M[Machine HMI Screen] -- HDMI --> K["kvmd  (:39000)"]
-    K -- "one-shot BGR888 frame" --> C[Client: Host PC / test script]
-    C -- "POST /ocr" --> O["ocr_server  (:8080)"]
-    O -- "boxes + alarm JSON" --> C
-    K -. "H.264 live stream" .-> V[Viewer, e.g. nano Virtual Console]
+    K -- "one-shot BGR888 frame, localhost" --> D[Driving script, on board]
+    D -- "POST /ocr, localhost" --> O["ocr_server  (:8080)"]
+    O -- "boxes + alarm JSON" --> D
+    D -- "JSON result, over network" --> H[Host PC]
+    K -. "H.264 live stream, over network" .-> V[Viewer, e.g. nano Virtual Console]
 ```
 
-Each OCR read is a full round trip: request a frame, wait for it, send it, get a result back. Nothing is cached or streamed automatically.
+Each OCR read is a full round trip on the board itself: request a frame, wait for it, send it, get a result back, all over localhost. Nothing is cached or streamed automatically. Only the compact result, not the raw frame, is meant to cross the network to a host PC.
 
 ## Directory Structure
 
@@ -46,13 +47,11 @@ recc/
       rknn_executor.cpp/h          # low-level RKNN model runner
       preprocess.cpp/h
       image_io.cpp/h               # raw .bgr888 file loading, used by benchmark
-    automation/                    # Stage 2 prototype: matches a hand-written rule against one
-                                    # saved OCR result and prints the resulting KVM action sequence
-                                    # (simpler than the goal/step closed loop design, see README below)
+    automation/                    # Stage 2 prototype: rule matching against a saved OCR result, see README below
   api/                             # Internal OCR API (ocr_server + minimal HTTP layer, see README below)
   third_party/                     # RKNN SDK headers + librknnrt.so
   aarch64-ubuntu20.04-toolchain.tar.gz  # cached aarch64 cross-compile toolchain (gitignored), see README below
-  board_deploy/                    # sample images + systemd service, ready to pscp to a board once built (see Setup)
+  board_deploy/                    # sample images + systemd service, ready to pscp to a board once built (see README below)
   model/
     PP-OCRv6_tiny_det.onnx         # conversion source
     PP-OCRv6_tiny_rec.onnx         # conversion source
@@ -61,33 +60,45 @@ recc/
     ppocr_keys_v6.txt              # character dictionary
 ```
 
-## Setup
+## Getting Started
 
-### Building the Binaries
+Follow these steps in order: build once, deploy to a board, run it, then install it as a service.
 
-`board_deploy/benchmark` and `board_deploy/ocr_server` are aarch64 binaries, cross-compiled for the RK3588 board and statically linked against OpenCV 4.5.4 (core+imgproc only), Clipper/polyclipping, and zlib. The only runtime dependency either needs beyond standard libc/libm/libpthread is `librknnrt.so`, already provided by the board at `/usr/lib`.
+### Prerequisites
 
-These binaries are gitignored, not committed, to avoid bloating git history with binary blobs. A fresh clone won't have them; build them once, then rebuild only when the C++ source changes.
+- An aarch64 gcc-9 toolchain matching the board's OS (Ubuntu 20.04, glibc 2.31), plus statically-built OpenCV 4.5.4 (core+imgproc only), Clipper/polyclipping, and zlib for aarch64. `aarch64-ubuntu20.04-toolchain.tar.gz` (repo root) has all of this pre-built, saving the ~20-minute bootstrap.
+- `librknnrt.so` on the board itself. This is already present at `/usr/lib` as part of the board's OS image, so there's nothing to install there.
 
-Rebuilding needs an aarch64 gcc-9 toolchain matching the board's Ubuntu 20.04/glibc 2.31, plus statically-built OpenCV/Clipper/zlib for aarch64. That environment is cached in `aarch64-ubuntu20.04-toolchain.tar.gz` (repo root) so a rebuild skips the ~20+ minute bootstrap:
+### 1. Build
 
-1. Extract: `tar xzf aarch64-ubuntu20.04-toolchain.tar.gz -C ~` (creates `~/cross`, `~/cross20`, `~/deps-arm64`, `~/rknn-arm64`, `~/fix_toolchain_paths.sh`).
-2. Run `bash ~/fix_toolchain_paths.sh` once, right after extracting, to rewrite absolute paths baked into the archive to the current `$HOME`. Safe to re-run.
-3. Build wrapper compilers pointing `-B` at `~/cross/usr/aarch64-linux-gnu/bin` (target binutils) and `~/cross20/usr/bin` (gcc-9 frontend); see `~/cross20/wrap/aarch64-linux-gnu-g++` inside the archive for the exact form.
-4. Set `LD_LIBRARY_PATH` to include `~/cross20/usr/lib/x86_64-linux-gnu` and `~/cross/usr/lib/x86_64-linux-gnu`.
-5. Configure with `-DCMAKE_TOOLCHAIN_FILE=...` using those wrapper compilers, plus `-DOPENCV_INCLUDE_DIR=~/deps-arm64/include/opencv4`, `-DOPENCV_LIB_DIR=~/deps-arm64/lib`, `-DCLIPPER_INCLUDE_DIR=~/deps-arm64/include`, `-DCLIPPER_LIB_DIR=~/deps-arm64/lib`, `-DZLIB_LIB_DIR=~/deps-arm64/lib`, `-DRKNN_SDK_LIB_DIR=~/rknn-arm64/lib`, `-DBUILD_TOOLS=ON`.
+`board_deploy/benchmark` and `board_deploy/ocr_server` are aarch64 binaries, statically linked against OpenCV, Clipper, and zlib. They're gitignored, not committed (to avoid bloating git history with binary blobs), so a fresh clone needs a build before first use; rebuild only when the C++ source changes.
+
+Extract the cached toolchain once:
+
+```bash
+tar xzf aarch64-ubuntu20.04-toolchain.tar.gz -C ~
+bash ~/fix_toolchain_paths.sh
+```
+
+This creates `~/cross` and `~/cross20` (the aarch64 toolchain), `~/deps-arm64` (OpenCV/Clipper/zlib), and `~/rknn-arm64` (RKNN SDK libs), and rewrites the archive's baked-in absolute paths to your `$HOME`. `fix_toolchain_paths.sh` is safe to re-run.
+
+Next, build wrapper compilers pointing `-B` at `~/cross/usr/aarch64-linux-gnu/bin` (target binutils) and `~/cross20/usr/bin` (gcc-9 frontend); see `~/cross20/wrap/aarch64-linux-gnu-g++` in the archive for the exact form. Then export `LD_LIBRARY_PATH` to include `~/cross20/usr/lib/x86_64-linux-gnu` and `~/cross/usr/lib/x86_64-linux-gnu`.
+
+Configure and build with those wrapper compilers and the extracted dependency paths:
 
 ```bash
 mkdir build && cd build
-cmake .. -DOPENCV_INCLUDE_DIR=... -DOPENCV_LIB_DIR=... -DCLIPPER_INCLUDE_DIR=... \
-         -DCLIPPER_LIB_DIR=... -DZLIB_LIB_DIR=... -DRKNN_SDK_LIB_DIR=... \
+cmake .. -DCMAKE_TOOLCHAIN_FILE=<toolchain file using the wrapper compilers above> \
+         -DOPENCV_INCLUDE_DIR=~/deps-arm64/include/opencv4 -DOPENCV_LIB_DIR=~/deps-arm64/lib \
+         -DCLIPPER_INCLUDE_DIR=~/deps-arm64/include -DCLIPPER_LIB_DIR=~/deps-arm64/lib \
+         -DZLIB_LIB_DIR=~/deps-arm64/lib -DRKNN_SDK_LIB_DIR=~/rknn-arm64/lib \
          -DBUILD_TOOLS=ON
 make
 ```
 
 `BUILD_TOOLS=ON` builds both `benchmark` and `ocr_server`; both need `RKNN_SDK_LIB_DIR` pointing at a real `librknnrt.so`, since they link the actual board runtime.
 
-### Deploying to a Board
+### 2. Deploy to a Board
 
 New board:
 
@@ -100,10 +111,8 @@ New board:
 
    `librknnrt.so` should already be present at `/usr/lib` as part of the board's own OS image.
 
-2. Test manually first, before wiring anything into systemd: run `ocr_server` by hand (see "Running It" below) and confirm `/health` responds, or run `benchmark` against one of the `testdata/*.bgr888` files. This catches a wrong path or missing model file while watching it directly, instead of inside a service that silently retries.
-
-3. Install it as a service (see "Running as a Service" below) so it starts on every boot and restarts itself if it crashes.
-
+2. Test manually first, before wiring anything into systemd: run `ocr_server` by hand (see "Run It" below) and confirm `/health` responds, or run `benchmark` against one of the `testdata/*.bgr888` files. This catches a wrong path or missing model file while watching it directly, instead of inside a service that silently retries.
+3. Install it as a service (see "Run as a Service" below) so it starts on every boot and restarts itself if it crashes.
 4. Note this board's IP address wherever it needs to be reachable from (e.g. the host PC). `ocr_server`, the models, and the service file are identical across every board; only the IP differs.
 
 Existing board, after a rebuild: re-upload just the changed binary and restart the service.
@@ -114,9 +123,44 @@ pscp board_deploy/ocr_server tpsadmin@192.168.1.101:/home/tpsadmin/board_deploy/
 
 Then on the board: `sudo systemctl restart ocr_server`.
 
-## Running `benchmark`
+### 3. Run It
 
-A one-shot command-line tool: decodes an image, runs detection, recognition, and alarm detection, prints results, and (with a cycle count) reports timing/CPU/memory.
+```bash
+cd ~/board_deploy
+./ocr_server /home/tpsadmin/model/PP-OCRv6_tiny_det_rk3588.rknn /home/tpsadmin/model/PP-OCRv6_tiny_rec_rk3588.rknn /home/tpsadmin/model/ppocr_keys_v6.txt 8080
+```
+
+Confirm it's up:
+
+```bash
+python3 -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8080/health').read())"
+```
+
+`/ocr` needs the 8-byte width/height header prepended before the pixel bytes, so it isn't a plain `curl --data-binary @file` call. See `recc_gen5_test_kit/test_ocr_continuous.py` for a working example that builds this request correctly, or the wire format under Usage below.
+
+### 4. Run as a Service (Survives Reboot)
+
+`board_deploy/ocr_server.service` is a systemd unit that starts `ocr_server` on boot and restarts it automatically if it crashes. `kvmd` has no equivalent yet; it's only backgrounded once by `kvmd_run.sh`, with no restart-on-crash supervision. Giving it the same systemd treatment is a future improvement.
+
+```bash
+sudo cp ~/board_deploy/ocr_server.service /etc/systemd/system/ocr_server.service
+sudo systemctl daemon-reload
+sudo systemctl enable ocr_server
+sudo systemctl start ocr_server
+```
+
+Check status or logs:
+
+```bash
+sudo systemctl status ocr_server --no-pager
+journalctl -u ocr_server -f
+```
+
+## Usage
+
+### `benchmark` (One-Shot CLI)
+
+Decodes an image, runs detection, recognition, and alarm detection, prints results, and (with a cycle count) reports timing/CPU/memory.
 
 ```bash
 cd ~/board_deploy
@@ -125,15 +169,15 @@ cd ~/board_deploy
 
 `testdata/` also has `auto_mode_1_1024x768.bgr888`, `auto_mode_2_1024x768.bgr888`, `normal_run_1024x768.bgr888`, and `full_test_1024x384.bgr888`. Add a cycle count for timing/CPU/memory stats, e.g. `... testdata/alarm_1024x768.bgr888 10`.
 
-## Internal OCR API
+### `ocr_server` (HTTP API)
 
 `ocr_server` (`api/`) loads the detection/recognition models once at startup, then serves OCR and alarm-detection results over HTTP, rather than running once per invocation like `benchmark` does.
 
-### `GET /health`
+#### `GET /health`
 
 Returns `200` with `{"status":"ok"}` once models are loaded.
 
-### `POST /ocr`
+#### `POST /ocr`
 
 Request body: an 8-byte header followed by tightly-packed pixel data, no padding:
 
@@ -165,38 +209,7 @@ Response `200`:
 
 Response `400` if the body is too short, or its size doesn't match `8 + width*height*3` for the given width/height: `{"error": "..."}` describing the mismatch.
 
-### Running It
-
-```bash
-cd ~/board_deploy
-./ocr_server /home/tpsadmin/model/PP-OCRv6_tiny_det_rk3588.rknn /home/tpsadmin/model/PP-OCRv6_tiny_rec_rk3588.rknn /home/tpsadmin/model/ppocr_keys_v6.txt 8080
-```
-
-```bash
-python3 -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8080/health').read())"
-```
-
-`/ocr` needs the 8-byte width/height header prepended before the pixel bytes, so it isn't a plain `curl --data-binary @file` call. See `recc_gen5_test_kit/test_ocr_continuous.py` for a working example that builds this request correctly.
-
-### Running as a Service (Survives Reboot)
-
-`board_deploy/ocr_server.service` is a systemd unit that starts `ocr_server` on boot and restarts it automatically if it crashes. `kvmd` has no equivalent yet; it's only backgrounded once by `kvmd_run.sh`, with no restart-on-crash supervision. Giving it the same systemd treatment is a future improvement.
-
-```bash
-sudo cp ~/board_deploy/ocr_server.service /etc/systemd/system/ocr_server.service
-sudo systemctl daemon-reload
-sudo systemctl enable ocr_server
-sudo systemctl start ocr_server
-```
-
-Check status or logs:
-
-```bash
-sudo systemctl status ocr_server --no-pager
-journalctl -u ocr_server -f
-```
-
-### Current Limitations
+## Current Limitations
 
 - One request handled at a time, on the calling thread; no concurrency.
 - No keep-alive, chunked encoding, or HTTPS; every request opens a new connection.
