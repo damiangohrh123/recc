@@ -9,6 +9,28 @@ PP-OCRv6 tiny detection and recognition on the Rockchip RK3588 NPU via RKNN, rea
 
 Detection runs a single full-image pass at the detector's native 480x480 input. Alarm detection converts the frame to HSV, masks for red, and filters by area, aspect ratio, and screen position; if a banner is found, it reuses the OCR text already collected for that region instead of running a second pass. Detection has no preprocessing step (no binarization, no upscaling); the model performs best on unprocessed input.
 
+## System Architecture
+
+The RECC board sits between a machine's HMI screen and the network. It only reads the screen and reports what OCR finds; it does not control the machine.
+
+Two independent services run on the board and never talk to each other directly:
+
+- **`kvmd`** captures the HDMI input from the screen. It is a separate binary from this repo (not built here). Over a TCP socket on port 39000, it serves a continuous H.264 stream for live viewing, and a one-shot raw BGR888 frame on request. It has no knowledge of OCR.
+- **`ocr_server`** (this repo) reads one frame at a time. It has no knowledge of `kvmd`; it only accepts raw BGR888 bytes over HTTP on port 8080 and returns text and alarm results.
+
+A client (a host PC, or a test script such as `recc_gen5_test_kit/test_ocr_continuous.py`) drives both: it requests one frame from `kvmd`, then sends those bytes to `ocr_server`. Read frequency is controlled entirely by that client; neither service polls or pushes on a schedule of its own.
+
+```mermaid
+flowchart LR
+    M[Machine HMI Screen] -- HDMI --> K["kvmd  (:39000)"]
+    K -- "one-shot BGR888 frame" --> C[Client: Host PC / test script]
+    C -- "POST /ocr" --> O["ocr_server  (:8080)"]
+    O -- "boxes + alarm JSON" --> C
+    K -. "H.264 live stream" .-> V[Viewer, e.g. nano Virtual Console]
+```
+
+Each OCR read is a full round trip: request a frame, wait for it, send it, get a result back. Nothing is cached or streamed automatically.
+
 ## Directory Structure
 
 ```
@@ -23,16 +45,14 @@ recc/
       text_correction.cpp/h        # narrow post-processing fix for two known recognition mistakes
       rknn_executor.cpp/h          # low-level RKNN model runner
       preprocess.cpp/h
-      image_io.cpp/h               # raw .bgr888 file loading, used by benchmark and ocr_server
+      image_io.cpp/h               # raw .bgr888 file loading, used by benchmark
     automation/                    # Stage 2 prototype: matches a hand-written rule against one
                                     # saved OCR result and prints the resulting KVM action sequence
                                     # (simpler than the goal/step closed loop design, see README below)
   api/                             # Internal OCR API (ocr_server + minimal HTTP layer, see README below)
   third_party/                     # RKNN SDK headers + librknnrt.so
   aarch64-ubuntu20.04-toolchain.tar.gz  # cached aarch64 cross-compile toolchain (gitignored), see README below
-  board_deploy/                    # sample images + systemd service, ready to pscp to a board
-                                    # (benchmark/ocr_server/automation_runner are gitignored build
-                                    # outputs -- build them first, see "Setup" below)
+  board_deploy/                    # sample images + systemd service, ready to pscp to a board once built (see Setup)
   model/
     PP-OCRv6_tiny_det.onnx         # conversion source
     PP-OCRv6_tiny_rec.onnx         # conversion source
@@ -47,7 +67,7 @@ recc/
 
 `board_deploy/benchmark` and `board_deploy/ocr_server` are aarch64 binaries, cross-compiled for the RK3588 board and statically linked against OpenCV 4.5.4 (core+imgproc only), Clipper/polyclipping, and zlib. The only runtime dependency either needs beyond standard libc/libm/libpthread is `librknnrt.so`, already provided by the board at `/usr/lib`.
 
-These binaries are gitignored, not committed, since rebuilding them on every source change would otherwise bloat git history with binary blobs. A fresh clone of this repo won't have them; build them once using the steps below, then only rebuild again if the C++ source changes.
+These binaries are gitignored, not committed, to avoid bloating git history with binary blobs. A fresh clone won't have them; build them once, then rebuild only when the C++ source changes.
 
 Rebuilding needs an aarch64 gcc-9 toolchain matching the board's Ubuntu 20.04/glibc 2.31, plus statically-built OpenCV/Clipper/zlib for aarch64. That environment is cached in `aarch64-ubuntu20.04-toolchain.tar.gz` (repo root) so a rebuild skips the ~20+ minute bootstrap:
 
@@ -80,11 +100,11 @@ New board:
 
    `librknnrt.so` should already be present at `/usr/lib` as part of the board's own OS image.
 
-2. Test manually first, before wiring anything into systemd: run `ocr_server` by hand (see "Running It" below) and confirm `/health` responds, or run `benchmark` against one of the `testdata/*.bgr888` files. This catches a wrong path or missing model file while you're watching it directly, instead of inside a service that silently retries.
+2. Test manually first, before wiring anything into systemd: run `ocr_server` by hand (see "Running It" below) and confirm `/health` responds, or run `benchmark` against one of the `testdata/*.bgr888` files. This catches a wrong path or missing model file while watching it directly, instead of inside a service that silently retries.
 
-3. Install it as a service (see "Running as a Service" below) so it starts automatically on every boot and restarts itself if it crashes.
+3. Install it as a service (see "Running as a Service" below) so it starts on every boot and restarts itself if it crashes.
 
-4. Note this board's IP address wherever it needs to be reachable from (e.g. the Host Application). `ocr_server`, the models, and the service file are identical across every board; only the IP differs.
+4. Note this board's IP address wherever it needs to be reachable from (e.g. the host PC). `ocr_server`, the models, and the service file are identical across every board; only the IP differs.
 
 Existing board, after a rebuild: re-upload just the changed binary and restart the service.
 
@@ -96,7 +116,7 @@ Then on the board: `sudo systemctl restart ocr_server`.
 
 ## Running `benchmark`
 
-A one-shot command-line tool: decodes an image, runs detection + recognition + alarm detection, prints results, and (with a cycle count) reports timing/CPU/memory measurement.
+A one-shot command-line tool: decodes an image, runs detection, recognition, and alarm detection, prints results, and (with a cycle count) reports timing/CPU/memory.
 
 ```bash
 cd ~/board_deploy
@@ -107,7 +127,7 @@ cd ~/board_deploy
 
 ## Internal OCR API
 
-`ocr_server` (`api/`) loads the detection/recognition models once at startup, then serves OCR and alarm-detection results over HTTP instead of running once per invocation like `benchmark`.
+`ocr_server` (`api/`) loads the detection/recognition models once at startup, then serves OCR and alarm-detection results over HTTP, rather than running once per invocation like `benchmark` does.
 
 ### `GET /health`
 
@@ -123,7 +143,7 @@ Request body: an 8-byte header followed by tightly-packed pixel data, no padding
 [width * height * 3 bytes: BGR888 pixel data, row-major, 3 bytes/pixel]
 ```
 
-Same byte order kvmd's own raw channel uses for its width/height/size fields, so a client that already speaks that protocol (e.g. `recc_gen5_test_kit/test_ocr_continuous.py`) needs no second convention to talk to this endpoint.
+Same byte order `kvmd`'s own raw channel uses for its width/height/size fields, so a client that already speaks that protocol (e.g. `recc_gen5_test_kit/test_ocr_continuous.py`) needs no second convention to talk to this endpoint.
 
 Response `200`:
 
@@ -160,7 +180,7 @@ python3 -c "import urllib.request; print(urllib.request.urlopen('http://localhos
 
 ### Running as a Service (Survives Reboot)
 
-`board_deploy/ocr_server.service` is a systemd unit that starts `ocr_server` on boot and restarts it automatically if it crashes. `kvmd` has no equivalent yet, it's just backgrounded once by `kvmd_run.sh` with no restart-on-crash supervision; giving it the same systemd treatment is a future improvement.
+`board_deploy/ocr_server.service` is a systemd unit that starts `ocr_server` on boot and restarts it automatically if it crashes. `kvmd` has no equivalent yet; it's only backgrounded once by `kvmd_run.sh`, with no restart-on-crash supervision. Giving it the same systemd treatment is a future improvement.
 
 ```bash
 sudo cp ~/board_deploy/ocr_server.service /etc/systemd/system/ocr_server.service
@@ -192,9 +212,9 @@ g++ -std=c++17 -O2 -I. pipeline/automation/*.cpp -o automation_runner
 ./automation_runner
 ```
 
-It reads every rule from `rules/` and every real OCR result from `ocr_output/` (both plain JSON files; see `pipeline/automation/rule.h` and `pipeline/automation/screens.h` for the shapes), and matches each rule against each screen. Nothing is sent to a machine; the resulting sequence is printed and waits for a person to approve it.
+It reads every rule from `rules/` and every saved OCR result from `ocr_output/` (both plain JSON files; see `pipeline/automation/rule.h` and `pipeline/automation/screens.h` for the shapes), and matches each rule against each screen. Nothing is sent to a machine; the resulting sequence is printed and waits for a person to approve it.
 
-This is a prototype of the fuller goal/step design described in `AI_automation_pipeline.docx` (Section 2), not a complete implementation of it: a rule here is a flat list of `{keyword, action, value}` steps, checked once against one already-saved screen, rather than the closed loop that design calls for (re-reading the screen via OCR after every action, retrying on a mismatch, and running live against a real KVM connection). Section 2.4 of that document lists what's left to build to close that gap.
+This is a prototype of the fuller goal/step design described in `Automation_Pipeline.docx` (Section 2), not a complete implementation of it: a rule here is a flat list of `{keyword, action, value}` steps, checked once against one already-saved screen, rather than the closed loop that design calls for (re-reading the screen via OCR after every action, retrying on a mismatch, and running live against a real KVM connection). Section 2.4 of that document lists what's left to build to close that gap.
 
 ## Environment
 
