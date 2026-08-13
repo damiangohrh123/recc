@@ -102,8 +102,8 @@ if(BUILD_TOOLS)
 
     # Internal OCR API server: same OCR + alarm pipeline as `ocr`, kept
     # resident and served over a minimal HTTP interface instead of run once
-    # against a single file. See the "Internal OCR API" section of the
-    # top-level README.md for the request/response contract.
+    # against a single file. See the "Usage > ocr_server (HTTP API)"
+    # section of the top-level README.md for the request/response contract.
     add_executable(ocr_server
         api/ocr_server.cpp
         api/http_server.cpp

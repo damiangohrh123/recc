@@ -1,7 +1,7 @@
 // Entry point for the Internal OCR API server: loads the det/rec models
 // once, then serves OCR + alarm-detection requests over HTTP until killed.
-// See the "Internal OCR API" section of the top-level README.md for the
-// request/response contract this implements.
+// See the "Usage > ocr_server (HTTP API)" section of the top-level
+// README.md for the request/response contract this implements.
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -68,10 +68,11 @@ HttpResponse run_ocr(TextSystem& text_system, AlarmDetector& alarm_detector, con
     return res;
 }
 
-// Reads a big-endian uint32 out of a 4-byte buffer -- matches the byte order
+// Reads a big-endian uint32 out of a 4-byte buffer, matching the byte order
 // kvmd's own raw channel already uses for its width/height/size fields (see
-// test_capture_and_ocr_compare.py's struct.pack('>HHHH', ...)), so a client
-// that already speaks kvmd's raw protocol doesn't need a second convention.
+// recc_gen5_test_kit/test_ocr_continuous.py, which builds this same request),
+// so a client that already speaks kvmd's raw protocol doesn't need a second
+// convention.
 uint32_t read_u32_be(const unsigned char* p) {
     return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | uint32_t(p[3]);
 }
@@ -90,7 +91,7 @@ int main(int argc, char** argv) {
 
     printf("loading models...\n");
     // Empty target/device_id runs inference on this board's own NPU, same
-    // as main.cpp.
+    // as benchmark.cpp.
     TextDetector detector(det_model_path, /*target=*/"", /*device_id=*/"",
         /*det_thresh=*/0.3f, /*box_thresh=*/0.4f,
         /*unclip_ratio=*/1.5f, /*max_candidates=*/3000);

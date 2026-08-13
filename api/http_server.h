@@ -8,15 +8,11 @@
 // time, read a request line + headers + Content-Length body, dispatch it to
 // a registered handler, and write back a status + body.
 //
-// Deliberately NOT included: keep-alive, chunked transfer encoding, HTTPS,
-// or concurrency (requests are handled one at a time on the calling
-// thread). This matches the pipeline's own usage pattern -- the host asks
-// for a frame read occasionally, not at high frequency -- and keeps this
-// dependency-free (no third-party library to cross-compile for the board).
-// If the team needs more than this later (concurrent requests, HTTPS,
-// persistent connections), swap this file for a real library such as
-// cpp-httplib; nothing in ocr_server.cpp above the HttpServer interface
-// would need to change.
+// See the top-level README's "Current Limitations" section for what's
+// deliberately left out (concurrency, keep-alive, HTTPS, etc.) and why. If
+// the team needs more than this later, swap this file for a real library
+// such as cpp-httplib; nothing in ocr_server.cpp above the HttpServer
+// interface would need to change.
 
 struct HttpRequest {
     std::string method;  // "GET" or "POST"

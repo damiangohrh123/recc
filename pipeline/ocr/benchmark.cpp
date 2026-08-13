@@ -25,9 +25,9 @@
 
 namespace {
 
-// Prints one box as "(x,y)-(x,y)-(x,y)-(x,y)" -- same format the old
-// main.cpp used, so this output isn't missing the full quad shape (useful
-// for tilted/skewed boxes) that a top-left+center summary would hide.
+// Prints one box as "(x,y)-(x,y)-(x,y)-(x,y)", preserving the full quad
+// shape (useful for tilted/skewed boxes) that a top-left+center summary
+// would hide.
 void print_box(const Quad& box) {
     for (size_t i = 0; i < box.size(); ++i) {
         printf("%s(%.0f,%.0f)", i ? "-" : "", box[i].x, box[i].y);
