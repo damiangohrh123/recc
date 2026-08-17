@@ -160,7 +160,8 @@ int main(int argc, char** argv) {
     if (argc < 5) {
         fprintf(stderr,
                 "usage: %s <det_model.rknn> <rec_model.rknn> <char_dict.txt> <image.jpg> "
-                "[cycles=1] [drop_score=0.4]\n",
+                "[cycles=1] [drop_score=0.4] [det_thresh=0.3] [box_thresh=0.4] "
+                "[unclip_ratio=1.5] [max_candidates=3000]\n",
                 argv[0]);
         return 1;
     }
@@ -170,12 +171,24 @@ int main(int argc, char** argv) {
     const std::string image_path = argv[4];
     const int cycles = argc > 5 ? std::atoi(argv[5]) : 1;
     const double drop_score = argc > 6 ? std::atof(argv[6]) : 0.4;
+    // Detection knobs below were never exposed for testing before -- they've
+    // been hardcoded since the very first commit with no record of any value
+    // other than these defaults ever being tried. Exposing them here lets a
+    // sweep compare alternatives without recompiling for every combination.
+    const float det_thresh = argc > 7 ? std::atof(argv[7]) : 0.3f;
+    const float box_thresh = argc > 8 ? std::atof(argv[8]) : 0.4f;
+    const float unclip_ratio = argc > 9 ? std::atof(argv[9]) : 1.5f;
+    const int max_candidates = argc > 10 ? std::atoi(argv[10]) : 3000;
 
     printf("\n  OCR Benchmark  (%d cycle%s)\n", cycles, cycles == 1 ? "" : "s");
-    printf("  Image      : %s\n", image_path.c_str());
-    printf("  Det model  : %s\n", det_model_path.c_str());
-    printf("  Rec model  : %s\n", rec_model_path.c_str());
-    printf("  Drop score : %.2f\n", drop_score);
+    printf("  Image          : %s\n", image_path.c_str());
+    printf("  Det model      : %s\n", det_model_path.c_str());
+    printf("  Rec model      : %s\n", rec_model_path.c_str());
+    printf("  Drop score     : %.2f\n", drop_score);
+    printf("  Det thresh     : %.2f\n", det_thresh);
+    printf("  Box thresh     : %.2f\n", box_thresh);
+    printf("  Unclip ratio   : %.2f\n", unclip_ratio);
+    printf("  Max candidates : %d\n", max_candidates);
     printf("--\n");
 
     auto load_start = std::chrono::steady_clock::now();
@@ -189,13 +202,12 @@ int main(int argc, char** argv) {
            static_cast<size_t>(std::ifstream(image_path, std::ios::binary | std::ios::ate).tellg()));
 
     printf("Loading models (not included in timing)...\n");
-    // Same construction as ocr_server.cpp, except drop_score is
-    // CLI-configurable here instead of fixed at 0.4 -- it now actually
-    // controls what TextSystem::run() returns, rather than being reapplied
-    // as a second, separate filter after the fact.
+    // Same construction as ocr_server.cpp, except every detection knob here
+    // is CLI-configurable instead of fixed, so a sweep script can compare
+    // alternatives without recompiling. Once a winner is found, carry the
+    // chosen values back over to ocr_server.cpp's hardcoded constructor call.
     TextDetector detector(det_model_path, /*target=*/"", /*device_id=*/"",
-                          /*det_thresh=*/0.3f, /*box_thresh=*/0.4f,
-                          /*unclip_ratio=*/1.5f, /*max_candidates=*/3000);
+                          det_thresh, box_thresh, unclip_ratio, max_candidates);
     if (!detector.is_loaded()) {
         fprintf(stderr, "det model failed to load\n");
         return 1;
