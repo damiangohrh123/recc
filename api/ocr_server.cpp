@@ -94,8 +94,8 @@ int main(int argc, char** argv) {
     // as benchmark.cpp.
     // det_thresh lowered from 0.3 to 0.2: a 36-combination sweep against
     // 394 ground-truth fields across 5 real machine screens (see
-    // documentation/Camera_Reading_Test_Results.docx) found 0.2 the most
-    // accurate value (82.5% vs 80.7% at 0.3), at no cost to speed.
+    // documentation/Automation_Pipeline.docx, Appendix C) found 0.2 the
+    // most accurate value (82.5% vs 80.7% at 0.3), at no cost to speed.
     TextDetector detector(det_model_path, /*target=*/"", /*device_id=*/"",
         /*det_thresh=*/0.2f, /*box_thresh=*/0.4f,
         /*unclip_ratio=*/1.5f, /*max_candidates=*/3000);

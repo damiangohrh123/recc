@@ -7,7 +7,7 @@ PP-OCRv6 tiny detection and recognition on the Rockchip RK3588 NPU via RKNN, rea
 | Det | PP-OCRv6 tiny det | INT8, 480×480 | ImageNet norm baked in; raw BGR in |
 | Rec | PP-OCRv6 tiny rec | FP16, 320×48 | `[0,1]` normalisation |
 
-Detection runs a single full-image pass at the detector's native 480x480 input. Alarm detection converts the frame to HSV, masks for red, and filters by area, aspect ratio, and screen position; if a banner is found, it reuses the OCR text already collected for that region instead of running a second pass. Preprocessing (binarization, upscaling) was tested for detection and dropped: it made results worse, so detection runs on unprocessed input.
+Detection runs a single full-image pass at the detector's native 480x480 input. Alarm detection converts the frame to HSV, masks for red, and filters by area, aspect ratio, and screen position; if a banner is found, it reuses the OCR text already collected for that region instead of running a second pass. Preprocessing (binarization, upscaling) was tested for detection and dropped: it made results worse, so detection runs on unprocessed input. Preprocessing was also tried on the recognition side (CLAHE contrast enhancement, unsharp-mask sharpening on each crop before resizing) and dropped for the same reason: both measurably hurt accuracy on every test screen (82.5% baseline dropped to 59.6% with CLAHE, 77.4% with sharpening), so recognition also runs on unprocessed crops.
 
 ## System Architecture
 
@@ -169,7 +169,7 @@ cd ~/board_deploy
 
 `testdata/` also has `auto_mode_1_1024x768.bgr888`, `auto_mode_2_1024x768.bgr888`, `normal_run_1024x768.bgr888`, and `full_test_1024x384.bgr888`. Add a cycle count for timing/CPU/memory stats, e.g. `... testdata/alarm_1024x768.bgr888 10`.
 
-The detector's own thresholds (`det_thresh`, `box_thresh`, `unclip_ratio`, `max_candidates`) are also CLI-configurable, as optional positional args after cycles and drop_score: `... testdata/alarm_1024x768.bgr888 1 0.4 <det_thresh> <box_thresh> <unclip_ratio> <max_candidates>`. These have been hardcoded since the project's first commit with no record of ever being tested against alternatives. `board_deploy/sweep_det_thresholds.sh` sweeps a small grid of these against every file in `testdata/` and logs box counts, timing, and recognized text per combination to `sweep_results.csv`, run it from `board_deploy/` after rebuilding `benchmark`.
+The detector's own thresholds (`det_thresh`, `box_thresh`, `unclip_ratio`, `max_candidates`) are also CLI-configurable, as optional positional args after cycles and drop_score: `... testdata/alarm_1024x768.bgr888 1 0.4 <det_thresh> <box_thresh> <unclip_ratio> <max_candidates>`. These had been hardcoded since the project's first commit with no record of ever being tested against alternatives. `board_deploy/sweep_det_thresholds.sh` sweeps a small grid of these against every file in `testdata/` and logs box counts, timing, and recognized text per combination to `sweep_results.csv`, run it from `board_deploy/` after rebuilding `benchmark`.
 
 ### `ocr_server` (HTTP API)
 
