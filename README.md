@@ -1,5 +1,7 @@
 # OCR Pipeline (RK3588 / RECC)
 
+The RECC board sits in front of a machine's HMI screen and reads it over HDMI, so the machine can be watched -- and, once a rule matches, operated -- with nobody at the controls. **System Architecture** below covers the whole flow, including the parts that live outside this repo.
+
 PP-OCRv6 tiny detection and recognition on the Rockchip RK3588 NPU via RKNN, reading text off machine HMI screens, with alarm-banner detection on top of the raw OCR output. This repo covers the production C++ implementation. Input is raw BGR888 only, since uncompressed pixel data preserves small text better.
 
 | Component | Model | Format | Notes |
@@ -7,11 +9,15 @@ PP-OCRv6 tiny detection and recognition on the Rockchip RK3588 NPU via RKNN, rea
 | Det | PP-OCRv6 tiny det | INT8, 480×480 | ImageNet norm baked in; raw BGR in |
 | Rec | PP-OCRv6 tiny rec | FP16, 320×48 | `[0,1]` normalisation |
 
-Detection runs a single full-image pass at the detector's native 480x480 input. Alarm detection converts the frame to HSV, masks for red, and filters by area, aspect ratio, and screen position; if a banner is found, it reuses the OCR text already collected for that region instead of running a second pass. Preprocessing (binarization, upscaling) was tested for detection and dropped: it made results worse, so detection runs on unprocessed input. Preprocessing was also tried on the recognition side (CLAHE contrast enhancement, unsharp-mask sharpening on each crop before resizing) and dropped for the same reason: both measurably hurt accuracy on every test screen (82.5% baseline dropped to 59.6% with CLAHE, 77.4% with sharpening), so recognition also runs on unprocessed crops.
+Detection runs a single full-image pass at the detector's native 480x480 input. Alarm detection converts the frame to HSV, masks for red, and filters by area, aspect ratio, and screen position; if a banner is found, it reuses the OCR text already collected for that region instead of running a second pass.
+
+### Why There Is No Preprocessing
+
+Preprocessing (binarization, upscaling) was tested for detection and dropped: it made results worse, so detection runs on unprocessed input. Preprocessing was also tried on the recognition side (CLAHE contrast enhancement, unsharp-mask sharpening on each crop before resizing) and dropped for the same reason: both measurably hurt accuracy on every test screen (82.5% baseline dropped to 59.6% with CLAHE, 77.4% with sharpening), so recognition also runs on unprocessed crops.
 
 ## System Architecture
 
-The RECC board sits between a machine's HMI screen and the network. Nothing in this repo drives the machine: `kvmd` captures the screen, `ocr_server` turns pixels into text, and `pipeline/automation/` decides whether a rule matched. Acting on that decision -- sending keyboard and mouse input back over USB HID -- belongs to `recc_gen5_test_kit/automation_driver/`, which drives the binaries built here. So the board as a whole can control the machine; this repo is the half that reads and decides. That HID output path has not yet been verified against real hardware.
+Nothing in this repo drives the machine: `kvmd` captures the screen, `ocr_server` turns pixels into text, and `pipeline/automation/` decides whether a rule matched. Acting on that decision -- sending keyboard and mouse input back over USB HID -- belongs to `recc_gen5_test_kit/automation_driver/`, which drives the binaries built here. So the board as a whole can control the machine; this repo is the half that reads and decides. That HID output path has not yet been verified against real hardware.
 
 Two independent services run on the board and never talk to each other directly:
 
@@ -218,13 +224,6 @@ Response `200`:
 
 Response `400` if the body is too short, or its size doesn't match `8 + width*height*3` for the given width/height: `{"error": "..."}` describing the mismatch.
 
-## Current Limitations
-
-- One request handled at a time, on the calling thread; no concurrency.
-- No keep-alive, chunked encoding, or HTTPS; every request opens a new connection.
-- No authentication; anyone who can reach the port can call it.
-- The HTTP layer (`http_server.h/.cpp`) is a small implementation over POSIX sockets, not a vendored library.
-
 ## Rule-Based Automation (Prototype)
 
 `pipeline/automation/` matches a person-written rule (a keyword to look for and what to do once found) against real OCR output, via fuzzy keyword matching. It never touches an image, only the text and coordinates OCR already produced, so unlike everything else in `pipeline/`, it has no OpenCV/RKNN dependency and isn't gated behind `BUILD_TOOLS` or a cross-compile toolchain -- it builds on any machine with a C++17 compiler:
@@ -234,6 +233,13 @@ cmake --build build --target step_matcher
 ```
 
 Its one binary, `step_matcher`, checks a single rule step against a single screen file and prints the match as JSON. Driving it is `recc_gen5_test_kit/automation_driver/`, which reads the screen live and can send real USB HID input; its `--dry-run --replay` mode does the same check against a saved screen without touching hardware. See that folder's README for what's tested versus what still needs real-board verification, and `recc_gen5_test_kit/automation_poc/` for the real captured screen and rule files it runs against.
+
+## Current Limitations
+
+- One request handled at a time, on the calling thread; no concurrency.
+- No keep-alive, chunked encoding, or HTTPS; every request opens a new connection.
+- No authentication; anyone who can reach the port can call it.
+- The HTTP layer (`http_server.h/.cpp`) is a small implementation over POSIX sockets, not a vendored library.
 
 ## Environment
 
