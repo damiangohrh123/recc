@@ -11,7 +11,7 @@ Detection runs a single full-image pass at the detector's native 480x480 input. 
 
 ## System Architecture
 
-The RECC board sits between a machine's HMI screen and the network. It only reads the screen and reports what OCR finds; it does not control the machine.
+The RECC board sits between a machine's HMI screen and the network. Nothing in this repo drives the machine: `kvmd` captures the screen, `ocr_server` turns pixels into text, and `pipeline/automation/` decides whether a rule matched. Acting on that decision -- sending keyboard and mouse input back over USB HID -- belongs to `recc_gen5_test_kit/automation_driver/`, which drives the binaries built here. So the board as a whole can control the machine; this repo is the half that reads and decides. That HID output path has not yet been verified against real hardware.
 
 Two independent services run on the board and never talk to each other directly:
 
@@ -28,6 +28,7 @@ flowchart LR
     O -- "boxes + alarm JSON" --> D
     D -- "JSON result, over network" --> H[Host PC]
     K -. "H.264 live stream, over network" .-> V[Viewer, e.g. nano Virtual Console]
+    D -. "USB HID keyboard/mouse, if a rule matched" .-> M
 ```
 
 ## Directory Structure
