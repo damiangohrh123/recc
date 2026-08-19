@@ -10,7 +10,6 @@ set(CLIPPER_INCLUDE_DIR "" CACHE PATH "Directory containing polyclipping/clipper
 set(CLIPPER_LIB_DIR     "" CACHE PATH "Directory containing libpolyclipping.so")
 set(ZLIB_LIB_DIR        "" CACHE PATH "Directory containing libz (needed by opencv_core's persistence/FileStorage code even without imgcodecs)")
 
-set(RKNN_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party" CACHE PATH "Directory containing rknn_api.h")
 set(RKNN_SDK_LIB_DIR    "" CACHE PATH "Directory containing librknnrt.so (board SDK only)")
 
 include_directories(
@@ -32,7 +31,7 @@ add_library(ocr_core STATIC
     pipeline/ocr/text_correction.cpp
 )
 
-target_include_directories(ocr_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${RKNN_SDK_INCLUDE_DIR})
+target_include_directories(ocr_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # imgcodecs (imread/imwrite/imdecode/imencode) is intentionally not linked:
 # no code in this library reads or writes image files -- frames arrive as
 # already-decoded cv::Mat objects from an earlier pipeline stage. Dropping it
@@ -63,44 +62,38 @@ if(RKNN_SDK_LIB_DIR)
     target_link_libraries(ocr_core PUBLIC rknnrt)
 endif()
 
-# Builds an executable that links ocr_core and loads raw .bgr888 images
-# (benchmark.cpp fits this shape). No stb_image/JPEG-PNG decode anymore --
-# this pipeline is raw BGR888 only (see pipeline/ocr/image_io.cpp).
-function(add_ocr_tool name source)
-    add_executable(${name} ${source} pipeline/ocr/image_io.cpp)
-    target_link_libraries(${name} PRIVATE ocr_core)
-    # librknnrt.so itself dynamically depends on the system's own
-    # libstdc++.so.6 at runtime (independent of ours being statically
-    # linked in) -- allow that to resolve at load time on the board rather
-    # than demanding a matching .so be present at link time here.
-    target_link_options(${name} PRIVATE -Wl,--allow-shlib-undefined)
-endfunction()
-
-# Goal-based automation: match an offline-drafted rule against real OCR
-# output and turn it into a KVM action sequence. No OpenCV/RKNN
-# dependency -- this logic never touches an image, only the text and
-# coordinates OCR already produced, so it builds and runs on any machine
-# and isn't gated behind BUILD_TOOLS like the RKNN-dependent targets below.
-add_executable(automation_runner
-    pipeline/automation/automation_runner.cpp
+# Goal-based automation (step_matcher): checks one rule step against one
+# real OCR result and prints the match as JSON. No OpenCV/RKNN dependency --
+# this logic never touches an image, only the text and coordinates OCR
+# already produced, so it builds and runs on any machine and isn't gated
+# behind BUILD_TOOLS like the RKNN-dependent targets below. Driven live by
+# recc_gen5_test_kit/automation_driver/, which also replays saved screens
+# offline via its --dry-run --replay mode.
+add_executable(step_matcher
+    pipeline/automation/step_matcher.cpp
     pipeline/automation/rule_matcher.cpp
-    pipeline/automation/kvm_sequence.cpp
-    pipeline/automation/rule.cpp
-    pipeline/automation/screens.cpp
     pipeline/automation/json_value.cpp
+    api/json_write.cpp   # shared with ocr_server; no OpenCV/RKNN dependency
 )
-target_include_directories(automation_runner PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Builds the runnable benchmark program (and ocr_server below) once a real
 # librknnrt.so is available (RKNN_SDK_LIB_DIR set).
+# librknnrt.so dynamically depends on the system's own libstdc++.so.6 at runtime
+# (independent of ours being statically linked in), so both executables below pass
+# -Wl,--allow-shlib-undefined: that lets it resolve at load time on the board
+# instead of demanding a matching .so be present at link time here.
 option(BUILD_TOOLS "Build the benchmark tool and ocr_server" OFF)
 if(BUILD_TOOLS)
     if(NOT RKNN_SDK_LIB_DIR)
         message(FATAL_ERROR "BUILD_TOOLS requires RKNN_SDK_LIB_DIR (needs the real librknnrt.so)")
     endif()
-    add_ocr_tool(benchmark pipeline/ocr/benchmark.cpp)
+    # benchmark reads raw .bgr888 files from disk (loader is file-local to
+    # benchmark.cpp); ocr_server receives raw bytes over HTTP, never a file.
+    add_executable(benchmark pipeline/ocr/benchmark.cpp)
+    target_link_libraries(benchmark PRIVATE ocr_core)
+    target_link_options(benchmark PRIVATE -Wl,--allow-shlib-undefined)
 
-    # Internal OCR API server: same OCR + alarm pipeline as `ocr`, kept
+    # Internal OCR API server: same OCR + alarm pipeline as `benchmark`, kept
     # resident and served over a minimal HTTP interface instead of run once
     # against a single file. See the "Usage > ocr_server (HTTP API)"
     # section of the top-level README.md for the request/response contract.

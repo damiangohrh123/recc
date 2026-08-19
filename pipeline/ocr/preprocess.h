@@ -5,7 +5,7 @@
 
 #include <opencv2/core.hpp>
 
-// C++ port of python/utils/preprocess.py.
+// C++ port of the Python reference implementation's utils/preprocess.py.
 
 // Applies (img * scale - mean) / std per channel. Shared by ppocr_det.cpp
 // and ppocr_rec.cpp, each with its own scale/mean/std values.

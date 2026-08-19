@@ -11,24 +11,6 @@ RknnExecutor::~RknnExecutor() {
 	release();
 }
 
-// Move ctor: steal the source's state, leave it in a released, safe-to-destroy state.
-RknnExecutor::RknnExecutor(RknnExecutor&& other) noexcept
-	: ctxs_(std::move(other.ctxs_)), loaded_(other.loaded_), output_shapes_(std::move(other.output_shapes_)) {
-	other.loaded_ = false;
-}
-
-// Move assignment: release whatever this instance currently holds, then steal from other.
-RknnExecutor& RknnExecutor::operator=(RknnExecutor&& other) noexcept {
-	if (this != &other) {
-		release();
-		ctxs_ = std::move(other.ctxs_);
-		loaded_ = other.loaded_;
-		output_shapes_ = std::move(other.output_shapes_);
-		other.loaded_ = false;
-	}
-	return *this;
-}
-
 namespace {
 	// Logs and returns false on failure; keeps each run() error check to one line.
 	bool check_ret(int ret, const char* what) {
@@ -43,10 +25,7 @@ namespace {
 	constexpr rknn_core_mask kCoreMasks[3] = {RKNN_NPU_CORE_0, RKNN_NPU_CORE_1, RKNN_NPU_CORE_2};
 }
 
-bool RknnExecutor::load(const std::string& model_path,
-	const std::string& /*target*/,
-	const std::string& /*device_id*/,
-	int num_cores) {
+bool RknnExecutor::load(const std::string& model_path, int num_cores) {
 	rknn_context ctx = 0;
 	// size=0 means model_path is a file path, not an in-memory buffer.
 	int ret = rknn_init(&ctx, const_cast<char*>(model_path.c_str()), 0, 0, nullptr);
@@ -160,12 +139,9 @@ void RknnExecutor::release() {
 }
 
 // Combines construction + load() so callers get a ready-to-use object or nullptr.
-std::unique_ptr<RknnExecutor> load_model(const std::string& model_path,
-	const std::string& target,
-	const std::string& device_id,
-	int num_cores) {
+std::unique_ptr<RknnExecutor> load_model(const std::string& model_path, int num_cores) {
 	auto exec = std::make_unique<RknnExecutor>();
-	if (!exec->load(model_path, target, device_id, num_cores)) {
+	if (!exec->load(model_path, num_cores)) {
 		return nullptr;
 	}
 	return exec;

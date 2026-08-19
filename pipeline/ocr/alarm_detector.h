@@ -6,7 +6,7 @@
 #include <opencv2/core.hpp>
 #include "ppocr_system.h"
 
-// C++ port of python/alarm_detector.py.
+// C++ port of the Python reference implementation's alarm_detector.py.
 
 // Whether an alarm banner was found, its box, and any text found inside it.
 struct AlarmResult {
@@ -24,9 +24,6 @@ public:
 
     // Finds the banner, then extracts its text from ocr_results if supplied.
     AlarmResult detect(const cv::Mat& img, const std::vector<OcrResult>& ocr_results = {}) const;
-
-    // Draws the alarm banner's box and label on a copy of img.
-    cv::Mat draw_debug(const cv::Mat& img, const AlarmResult& result) const;
 
 private:
     // Masks for red, then finds the largest contour passing all 3 filters.

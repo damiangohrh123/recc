@@ -18,38 +18,11 @@ struct DetectedBox {
     std::array<std::array<int, 2>, 4> box{};
 };
 
-// One step of an offline-drafted rule: a keyword to look for, and what
-// to do once it's found. Written ahead of time (by a person, or a real
-// LLM whose output a person tests before trusting) -- only the matching
-// below runs live.
-struct Step {
-    std::string keyword;
-    std::string action;  // "type" or "click"
-    std::string value;   // only used when action == "type"
-};
-
-// One concrete KVM action.
-struct Action {
-    std::string type;  // "move", "click", or "type"
-    int x = 0;
-    int y = 0;
-    std::string text;  // only used when type == "type"
-};
-
-struct MatchResult {
-    std::vector<Action> actions;
-    bool complete = false;  // false = some step couldn't be confidently
-                             // matched; stop and let a person check
-};
-
-// Ratcliff/Obershelp similarity ratio between two strings, in [0, 1].
-// Same algorithm Python's difflib.SequenceMatcher.ratio() uses (minus
-// the "autojunk" heuristic, which only applies to sequences of 200+
-// elements and is irrelevant for short UI labels).
-double sequence_ratio(const std::string& a, const std::string& b);
-
-// Returns the box whose text best matches the keyword, and its
-// confidence score. Returns {nullptr, 0.0} if boxes is empty.
+// Returns the box whose text best matches the keyword, and its match score.
+// Scoring is the Ratcliff/Obershelp similarity ratio (the same algorithm
+// Python's difflib.SequenceMatcher.ratio() uses), plus a 0.3 bonus when the
+// keyword appears as a substring -- so the score ranges over [0, 1.3], not
+// [0, 1]. Returns {nullptr, 0.0} if boxes is empty.
 std::pair<const DetectedBox*, double> find_by_keyword(const std::string& keyword,
                                                        const std::vector<DetectedBox>& boxes);
 
@@ -61,10 +34,3 @@ std::pair<int, int> box_center(const std::array<std::array<int, 2>, 4>& box);
 // detected box already occupies.
 std::pair<int, int> find_field_near_label(const DetectedBox& label_box,
                                            const std::vector<DetectedBox>& boxes);
-
-// Matches every step of a rule against the given screen's boxes, in
-// order. Below CONFIDENCE_THRESHOLD, stops immediately instead of
-// guessing (result.complete = false).
-MatchResult match_rule_to_screen(const std::vector<Step>& rule,
-                                  const std::vector<DetectedBox>& boxes,
-                                  double confidence_threshold);

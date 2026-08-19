@@ -4,8 +4,8 @@
 *    This is the declarations-only header needed to compile against
 *    librknnrt on the board. It is NOT redistributed source of the
 *    library itself -- librknnrt.so must come from the board's SDK
-*    install (matching the version documented in transition.md:
-*    librknnrt 2.4.2a2+).
+*    install (librknnrt 2.4.2a2 or newer -- see the "Environment" table
+*    in the top-level README.md).
 *
 *    Trimmed to the subset of declarations rknn_executor.cpp actually
 *    uses (rknn_init, rknn_query, rknn_inputs_set, rknn_run,
@@ -24,7 +24,8 @@ extern "C" {
 
 #include <stdint.h>
 
-/* Error codes (subset actually checked by rknn_executor.cpp). */
+/* Error codes. Only RKNN_SUCC is compared against; the RKNN_ERR_* values are
+   kept for readability when debugging a raw return code. */
 #define RKNN_SUCC                               0
 #define RKNN_ERR_FAIL                           -1
 #define RKNN_ERR_TIMEOUT                        -2

@@ -73,6 +73,15 @@ HttpResponse run_ocr(TextSystem& text_system, AlarmDetector& alarm_detector, con
 // recc_gen5_test_kit/test_ocr_continuous.py, which builds this same request),
 // so a client that already speaks kvmd's raw protocol doesn't need a second
 // convention.
+// One place to build a 400: the /ocr handler rejects three different ways and
+// every one of them needs the same status + JSON-error shape.
+HttpResponse bad_request(const std::string& message) {
+    HttpResponse res;
+    res.status = 400;
+    res.body = "{\"error\":\"" + json_escape(message) + "\"}";
+    return res;
+}
+
 uint32_t read_u32_be(const unsigned char* p) {
     return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | uint32_t(p[3]);
 }
@@ -90,13 +99,11 @@ int main(int argc, char** argv) {
     const int port = std::atoi(argv[4]);
 
     printf("loading models...\n");
-    // Empty target/device_id runs inference on this board's own NPU, same
-    // as benchmark.cpp.
     // det_thresh lowered from 0.3 to 0.2: a 36-combination sweep against
     // 394 ground-truth fields across 5 real machine screens (see
     // documentation/Automation_Pipeline.docx, Appendix C) found 0.2 the
     // most accurate value (82.5% vs 80.7% at 0.3), at no cost to speed.
-    TextDetector detector(det_model_path, /*target=*/"", /*device_id=*/"",
+    TextDetector detector(det_model_path,
         /*det_thresh=*/0.2f, /*box_thresh=*/0.4f,
         /*unclip_ratio=*/1.5f, /*max_candidates=*/3000);
     if (!detector.is_loaded()) {
@@ -104,7 +111,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    TextRecognizer recognizer(rec_model_path, /*target=*/"", /*device_id=*/"", char_dict_path);
+    TextRecognizer recognizer(rec_model_path, char_dict_path);
     if (!recognizer.is_loaded()) {
         fprintf(stderr, "rec model failed to load\n");
         return 1;
@@ -125,17 +132,14 @@ int main(int argc, char** argv) {
     });
 
     // Raw BGR888 input only -- no JPEG/PNG decode step anywhere in this
-    // server (JPEG artifacts can distort small text -- see image_io.h).
+    // server (JPEG artifacts can distort small text).
     // Body layout: 4-byte big-endian width, 4-byte big-endian height, then
     // exactly width*height*3 bytes of tightly-packed BGR888 (no padding, no
     // per-row stride gap -- same layout kvmd's raw channel already
     // produces).
     server.on("POST", "/ocr", [&](const HttpRequest& req) {
         if (req.body.size() < 8) {
-            HttpResponse res;
-            res.status = 400;
-            res.body = "{\"error\":\"body too short for width/height header\"}";
-            return res;
+            return bad_request("body too short for width/height header");
         }
         const unsigned char* bytes = reinterpret_cast<const unsigned char*>(req.body.data());
         const uint32_t width = read_u32_be(bytes);
@@ -146,22 +150,15 @@ int main(int argc, char** argv) {
         constexpr uint32_t kMaxDimension = 16384;
 
         if (width == 0 || height == 0 || width > kMaxDimension || height > kMaxDimension) {
-            HttpResponse res;
-            res.status = 400;
-            res.body = "{\"error\":\"width/height missing or out of range\"}";
-            return res;
+            return bad_request("width/height missing or out of range");
         }
 
         const size_t expected_size = size_t(8) + size_t(width) * size_t(height) * 3;
         if (req.body.size() != expected_size) {
-            HttpResponse res;
-            res.status = 400;
             std::ostringstream msg;
-            msg << "{\"error\":\"body size " << req.body.size() << " does not match 8 + width*height*3 "
-                << "for width=" << width << " height=" << height << " (expected " << expected_size << ")\"}";
-            res.status = 400;
-            res.body = msg.str();
-            return res;
+            msg << "body size " << req.body.size() << " does not match 8 + width*height*3 "
+                << "for width=" << width << " height=" << height << " (expected " << expected_size << ")";
+            return bad_request(msg.str());
         }
 
         // Own a copy of the pixel bytes: req.body (and therefore `bytes`)

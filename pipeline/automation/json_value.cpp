@@ -1,5 +1,4 @@
 #include "json_value.h"
-#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
@@ -174,12 +173,14 @@ private:
     }
 };
 
-}  // namespace
-
+// Only json_parse_file is public; parsing from a string is an implementation
+// detail of it.
 JsonValue json_parse(const std::string& text) {
     Parser p(text);
     return p.parse();
 }
+
+}  // namespace
 
 JsonValue json_parse_file(const std::string& path) {
     std::ifstream f(path);
@@ -187,15 +188,4 @@ JsonValue json_parse_file(const std::string& path) {
     std::ostringstream ss;
     ss << f.rdbuf();
     return json_parse(ss.str());
-}
-
-std::vector<std::filesystem::path> list_json_files(const std::string& dir) {
-    namespace fs = std::filesystem;
-    std::vector<fs::path> files;
-    if (!fs::is_directory(dir)) return files;
-    for (const auto& entry : fs::directory_iterator(dir)) {
-        if (entry.path().extension() == ".json") files.push_back(entry.path());
-    }
-    std::sort(files.begin(), files.end());
-    return files;
 }

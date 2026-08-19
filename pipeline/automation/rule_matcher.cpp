@@ -1,6 +1,5 @@
 #include "rule_matcher.h"
 #include <algorithm>
-#include <cstdio>
 #include <unordered_map>
 
 namespace {
@@ -57,18 +56,18 @@ int count_matches(const std::string& a, int alo, int ahi,
     return total;
 }
 
-Action move_to(int x, int y) { return {"move", x, y, ""}; }
-Action click_action() { return {"click", 0, 0, ""}; }
-Action type_action(const std::string& text) { return {"type", 0, 0, text}; }
-
-}  // namespace
-
+// Ratcliff/Obershelp similarity ratio, in [0, 1] -- the same algorithm
+// Python's difflib.SequenceMatcher.ratio() uses (minus the "autojunk"
+// heuristic, which only applies to sequences of 200+ elements and is
+// irrelevant for short UI labels). Only find_by_keyword uses it.
 double sequence_ratio(const std::string& a, const std::string& b) {
     int total_len = static_cast<int>(a.size() + b.size());
     if (total_len == 0) return 1.0;
     int matches = count_matches(a, 0, static_cast<int>(a.size()), b, 0, static_cast<int>(b.size()));
     return 2.0 * matches / total_len;
 }
+
+}  // namespace
 
 std::pair<const DetectedBox*, double> find_by_keyword(const std::string& keyword,
                                                        const std::vector<DetectedBox>& boxes) {
@@ -112,41 +111,4 @@ std::pair<int, int> find_field_near_label(const DetectedBox& label_box,
         }
     }
     return {candidate_x, ly_center};
-}
-
-MatchResult match_rule_to_screen(const std::vector<Step>& rule,
-                                  const std::vector<DetectedBox>& boxes,
-                                  double confidence_threshold) {
-    MatchResult result;
-    result.complete = true;
-    int i = 1;
-    for (const auto& step : rule) {
-        auto [match, score] = find_by_keyword(step.keyword, boxes);
-        std::string label = match ? match->text : "(nothing found)";
-        printf("Step %d: keyword \"%s\" -> best match \"%s\" (confidence %.2f)\n",
-               i, step.keyword.c_str(), label.c_str(), score);
-
-        if (match == nullptr || score < confidence_threshold) {
-            printf("   Below the %.2f confidence threshold. Stopping here, this step needs a "
-                   "person to check, not a guess.\n\n", confidence_threshold);
-            result.complete = false;
-            return result;
-        }
-
-        if (step.action == "type") {
-            auto [x, y] = find_field_near_label(*match, boxes);
-            auto [cx, cy] = box_center(match->box);
-            printf("   Label at (%d, %d); open field found at (%d, %d)\n\n", cx, cy, x, y);
-            result.actions.push_back(move_to(x, y));
-            result.actions.push_back(click_action());
-            result.actions.push_back(type_action(step.value));
-        } else if (step.action == "click") {
-            auto [cx, cy] = box_center(match->box);
-            printf("   Clicking at (%d, %d)\n\n", cx, cy);
-            result.actions.push_back(move_to(cx, cy));
-            result.actions.push_back(click_action());
-        }
-        ++i;
-    }
-    return result;
 }

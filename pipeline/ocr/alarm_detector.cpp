@@ -1,5 +1,4 @@
 #include "alarm_detector.h"
-#include <algorithm>
 #include <opencv2/imgproc.hpp>
 
 AlarmDetector::AlarmDetector(int min_area, double min_aspect_ratio, double max_y_fraction)
@@ -92,16 +91,4 @@ std::optional<std::string> AlarmDetector::extract_alarm_text(const std::vector<O
 
     if (!any_found) return std::nullopt;
     return joined;
-}
-
-// Draws the alarm banner's box and label on a copy of img.
-cv::Mat AlarmDetector::draw_debug(const cv::Mat& img, const AlarmResult& result) const {
-    cv::Mat out = img.clone();
-    if (result.alarm) {
-        cv::rectangle(out, result.bbox, cv::Scalar(0, 255, 0), 3);
-        std::string label = result.text.has_value() ? ("ALARM: " + *result.text) : "ALARM";
-        cv::putText(out, label, cv::Point(result.bbox.x, std::max(result.bbox.y - 8, 20)),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
-    }
-    return out;
 }

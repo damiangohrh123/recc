@@ -2,13 +2,20 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <numeric>
 #include <utility>
 #include <opencv2/imgproc.hpp>
 #include "text_correction.h"
 
+namespace {
+
+double ms_since(std::chrono::steady_clock::time_point start) {
+	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+}
+
 // Filters overlapping boxes using Intersection-over-Min-Area (IoM),
 // keeping the larger box in each overlapping pair.
-std::vector<Quad> nms_boxes(const std::vector<Quad>& boxes, double iom_threshold) {
+std::vector<Quad> nms_boxes(const std::vector<Quad>& boxes, double iom_threshold = 0.6) {
 	if (boxes.size() <= 1) return boxes;
 
 	// Converts each box to a point vector once (reused below), and computes its area from that.
@@ -21,7 +28,7 @@ std::vector<Quad> nms_boxes(const std::vector<Quad>& boxes, double iom_threshold
 
 	// Sort box indices by area in descending order.
 	std::vector<int> order(boxes.size());
-	for (size_t i = 0; i < order.size(); ++i) order[i] = static_cast<int>(i);
+	std::iota(order.begin(), order.end(), 0);
 	std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return areas[a] > areas[b]; });
 
 	std::vector<bool> suppressed(boxes.size(), false);
@@ -112,6 +119,8 @@ std::vector<Quad> sorted_boxes(std::vector<Quad> dt_boxes) {
 	return dt_boxes;
 }
 
+}  // namespace
+
 TextSystem::TextSystem(TextDetector detector, TextRecognizer recognizer,
 	double drop_score, double min_height, double min_width)
 	: detector_(std::move(detector)),
@@ -119,12 +128,6 @@ TextSystem::TextSystem(TextDetector detector, TextRecognizer recognizer,
 	drop_score_(drop_score),
 	min_height_(min_height),
 	min_width_(min_width) {}
-
-namespace {
-	double ms_since(std::chrono::steady_clock::time_point start) {
-		return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-	}
-}
 
 // Full pipeline for one image: find text boxes, crop each one out straight,
 // read the text in each crop, and return only the results we're confident in.

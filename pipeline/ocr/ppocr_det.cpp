@@ -5,6 +5,16 @@
 #include <opencv2/imgproc.hpp>
 #include <polyclipping/clipper.hpp>
 
+namespace {
+
+// Resizes an image to (target_w, target_h) and records how much each
+// dimension was scaled.
+struct ResizeResult {
+	cv::Mat image;
+	float ratio_h;  // target_h / original image height
+	float ratio_w;  // target_w / original image width
+};
+
 double polygon_area(const std::vector<cv::Point2f>& points) {
 	double area = 0.0;
 	size_t n = points.size();
@@ -33,8 +43,6 @@ ResizeResult det_resize_for_test(const cv::Mat& img, int target_h, int target_w)
 	cv::resize(img, result.image, cv::Size(target_w, target_h));
 	return result;
 }
-
-namespace {
 
 	// Splits 4 x-sorted points into left/right pairs and picks the smaller-y
 	// point in each pair as the top corner, returning tl, tr, br, bl.
@@ -191,9 +199,11 @@ std::vector<Quad> DBPostProcess::run(const cv::Mat& pred_map, int dest_width, in
 	return boxes_from_bitmap(pred_map, bitmap, dest_width, dest_height, ratio_w, ratio_h);
 }
 
-// --- DetPostProcess ------------------------------------------------------
+// --- detected-quad cleanup (file-local: only TextDetector::run uses it) ----
 
-Quad DetPostProcess::order_points_clockwise(const Quad& pts) {
+namespace {
+
+Quad order_points_clockwise(const Quad& pts) {
 	// Sorts the 4 points by x, then reorders them into tl, tr, br, bl.
 	std::vector<cv::Point2f> sorted_by_x(pts.begin(), pts.end());
 	std::sort(sorted_by_x.begin(), sorted_by_x.end(),
@@ -201,18 +211,18 @@ Quad DetPostProcess::order_points_clockwise(const Quad& pts) {
 	return order_quad(sorted_by_x);
 }
 
-Quad DetPostProcess::clip_det_res(Quad points, int img_height, int img_width) {
+Quad clip_det_res(Quad points, int img_height, int img_width) {
 	for (auto& p : points) {
 		// Clamps the point into the image bounds, then truncates it to an integer pixel.
-		float x = std::min(std::max(p.x, 0.0f), static_cast<float>(img_width - 1));
-		float y = std::min(std::max(p.y, 0.0f), static_cast<float>(img_height - 1));
+		float x = std::clamp(p.x, 0.0f, static_cast<float>(img_width - 1));
+		float y = std::clamp(p.y, 0.0f, static_cast<float>(img_height - 1));
 		p.x = static_cast<float>(static_cast<int>(x));
 		p.y = static_cast<float>(static_cast<int>(y));
 	}
 	return points;
 }
 
-std::vector<Quad> DetPostProcess::filter_tag_det_res(const std::vector<Quad>& dt_boxes,
+std::vector<Quad> filter_tag_det_res(const std::vector<Quad>& dt_boxes,
 	int image_height, int image_width) {
 	std::vector<Quad> result;
 	for (const auto& raw_box : dt_boxes) {
@@ -227,13 +237,13 @@ std::vector<Quad> DetPostProcess::filter_tag_det_res(const std::vector<Quad>& dt
 	return result;
 }
 
+}  // namespace
+
 // --- TextDetector ----------------------------------------------------------
 
 TextDetector::TextDetector(const std::string& det_model_path,
-	const std::string& target,
-	const std::string& device_id,
 	float det_thresh, float box_thresh, float unclip_ratio, int max_candidates)
-	: model_(load_model(det_model_path, target, device_id)),
+	: model_(load_model(det_model_path)),
 	// Configures normalization as scale=1, mean=0, std=1 -- a no-op, since
 	// this model already has normalization baked into its weights.
 	normalize_(1.0, { 0.0, 0.0, 0.0 }, { 1.0, 1.0, 1.0 }),
@@ -268,5 +278,5 @@ std::vector<Quad> TextDetector::run(const cv::Mat& img) const {
 
 	// Converts the probability map into boxes, then cleans up their order and bounds.
 	std::vector<Quad> raw_boxes = db_postprocess_.run(pred_map, src_w, src_h, resized.ratio_w, resized.ratio_h);
-	return DetPostProcess::filter_tag_det_res(raw_boxes, src_h, src_w);
+	return filter_tag_det_res(raw_boxes, src_h, src_w);
 }

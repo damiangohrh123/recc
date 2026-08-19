@@ -16,25 +16,17 @@
 // bottom-right, bottom-left.
 using Quad = std::array<cv::Point2f, 4>;
 
-// Computes a polygon's area/perimeter from its ordered points, using the
-// shoelace formula.
-double polygon_area(const std::vector<cv::Point2f>& points);
-double polygon_perimeter(const std::vector<cv::Point2f>& points);
-
-// Resizes an image to (target_w, target_h) and records how much each
-// dimension was scaled.
-struct ResizeResult {
-    cv::Mat image;
-    float ratio_h;  // target_h / original image height
-    float ratio_w;  // target_w / original image width
-};
-ResizeResult det_resize_for_test(const cv::Mat& img, int target_h, int target_w);
-
 // Turns the detector's raw probability map into candidate text-box quads.
 class DBPostProcess {
 public:
     DBPostProcess(float thresh, float box_thresh, int max_candidates, float unclip_ratio);
 
+    // Thresholds the probability map into a binary mask, then extracts
+    // boxes from it. The only entry point; everything below is internal.
+    std::vector<Quad> run(const cv::Mat& pred_map, int dest_width, int dest_height,
+                           float ratio_w, float ratio_h) const;
+
+private:
     // Computes the smallest rotated rectangle enclosing a set of points,
     // returned as 4 ordered corners plus its short side length ("sside").
     static std::pair<Quad, float> get_mini_boxes(const std::vector<cv::Point2f>& points);
@@ -52,12 +44,6 @@ public:
                                          int dest_width, int dest_height,
                                          float ratio_w, float ratio_h) const;
 
-    // Thresholds the probability map into a binary mask, then extracts
-    // boxes from it.
-    std::vector<Quad> run(const cv::Mat& pred_map, int dest_width, int dest_height,
-                           float ratio_w, float ratio_h) const;
-
-private:
     float thresh_;          // probability threshold used to binarize pred_map
     float box_thresh_;      // minimum average score for a candidate box to survive
     int max_candidates_;    // cap on contours examined per image
@@ -65,25 +51,11 @@ private:
     static constexpr float kMinSize = 3.0f;
 };
 
-// Orders, clips, and filters detected quads to prepare them for cropping.
-// All methods are static; this class holds no instance state.
-class DetPostProcess {
-public:
-    static Quad order_points_clockwise(const Quad& pts);  // reorders 4 points as tl, tr, br, bl
-    static Quad clip_det_res(Quad points, int img_height, int img_width);  // clamps points into the image bounds
-
-    // Orders and clips each box, dropping any narrower or shorter than 3px.
-    static std::vector<Quad> filter_tag_det_res(const std::vector<Quad>& dt_boxes,
-                                                 int image_height, int image_width);
-};
-
 // Runs the full detection pipeline: resize, normalize, run the model, and
 // turn its output into text-box quadrilaterals.
 class TextDetector {
 public:
     TextDetector(const std::string& det_model_path,
-                 const std::string& target,
-                 const std::string& device_id,
                  float det_thresh, float box_thresh, float unclip_ratio, int max_candidates);
 
     bool is_loaded() const { return model_ && model_->is_loaded(); }

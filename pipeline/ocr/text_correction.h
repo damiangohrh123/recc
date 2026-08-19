@@ -8,5 +8,6 @@
 // labels. Deliberately narrow, this only rewrites text matching one of
 // those two specific, well-evidenced failure modes, not general
 // spell-checking. Pure string processing, no OpenCV dependency, so it's
-// independent of the rest of the OCR pipeline and easy to test on its own.
+// independent of the rest of the OCR pipeline, so it can be changed or
+// tested without touching detection or recognition.
 std::string correct_known_ocr_errors(const std::string& text);

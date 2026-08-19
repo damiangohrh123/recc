@@ -22,20 +22,6 @@ struct RunTiming {
 	int n_crops = 0;       // boxes recognized (1 on the small-image fallback path)
 };
 
-// Suppresses duplicate/nested boxes via Intersection-over-Min-Area (also
-// catches a small box mostly contained in a larger one).
-std::vector<Quad> nms_boxes(const std::vector<Quad>& boxes, double iom_threshold = 0.6);
-
-// Checks whether a box's height and width both meet the given minimums.
-bool box_size_ok(const Quad& b, double min_h, double min_w);
-
-// Perspective-corrects a quad region into an upright crop, rotating 90
-// degrees if the result comes out tall.
-cv::Mat get_rotate_crop_image(const cv::Mat& img, const Quad& box);
-
-// Top-to-bottom, then left-to-right within a row (~10px row tolerance).
-std::vector<Quad> sorted_boxes(std::vector<Quad> dt_boxes);
-
 // Ties detection and recognition together into the full per-image pipeline.
 class TextSystem {
 public:

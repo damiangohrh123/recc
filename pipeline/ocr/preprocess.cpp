@@ -1,7 +1,5 @@
 #include "preprocess.h"
 
-#include <opencv2/imgproc.hpp>
-
 // Stores the scale/mean/std to apply on every call.
 NormalizeImage::NormalizeImage(double scale, const std::array<double, 3>& mean, const std::array<double, 3>& std)
 	: scale_(scale), mean_(mean[0], mean[1], mean[2]), std_(std[0], std[1], std[2]) {}

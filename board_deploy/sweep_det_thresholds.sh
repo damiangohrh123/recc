@@ -51,7 +51,10 @@ for image in "${IMAGES[@]}"; do
                 n_boxes=$(echo "$output" | grep -c '^\s*\[' || true)
                 det_ms=$(echo "$output" | grep "Det      :" | grep -oP '[0-9.]+(?= ms)' || echo "NA")
                 # Flatten all recognized text onto one semicolon-separated field.
-                texts=$(echo "$output" | grep -oP 'text="\K[^"]*' | paste -sd ';' -)
+                # || true like the two lines above: with `set -o pipefail`, an
+                # image that produced no recognized text makes grep exit 1 and
+                # would abort the whole sweep partway through.
+                texts=$(echo "$output" | grep -oP 'text="\K[^"]*' | paste -sd ';' - || true)
 
                 echo "\"$image\",$det_t,$box_t,$unclip,$n_boxes,$det_ms,\"$texts\"" >> "$OUT"
             done

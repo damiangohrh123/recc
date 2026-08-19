@@ -59,10 +59,8 @@ RecResult CtcLabelDecode::decode(const float* preds, int seq_len, int num_classe
 }
 
 TextRecognizer::TextRecognizer(const std::string& rec_model_path,
-	const std::string& target,
-	const std::string& device_id,
 	const std::string& character_dict_path)
-	: model_(load_model(rec_model_path, target, device_id, kNumCores)),
+	: model_(load_model(rec_model_path, kNumCores)),
 	// Scales pixel values into [0,1]; no mean/std shift is applied.
 	normalize_(1.0 / 255.0, { 0.0, 0.0, 0.0 }, { 1.0, 1.0, 1.0 }),
 	ctc_decode_(character_dict_path, /*use_space_char=*/true) {

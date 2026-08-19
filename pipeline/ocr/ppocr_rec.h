@@ -33,8 +33,6 @@ private:
 class TextRecognizer {
 public:
     TextRecognizer(const std::string& rec_model_path,
-                   const std::string& target,
-                   const std::string& device_id,
                    const std::string& character_dict_path);
 
     bool is_loaded() const { return model_ && model_->is_loaded(); }

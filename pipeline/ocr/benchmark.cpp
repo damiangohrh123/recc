@@ -15,15 +15,59 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 #include <opencv2/core.hpp>
 #include "alarm_detector.h"
 #include "ppocr_det.h"
 #include "ppocr_rec.h"
 #include "ppocr_system.h"
-#include "image_io.h"
 
 namespace {
+
+// --- raw .bgr888 loading (this is the only consumer) -----------------------
+// Raw BGR888 only: no JPEG/PNG decode anywhere in this pipeline, since JPEG
+// artifacts distort small text and production only ever captures raw.
+
+// Parses "..._<width>x<height>.bgr888" -> {width, height}, or {0, 0} if the
+// file name doesn't match that shape. Raw pixel data carries no size
+// information of its own, so the name has to encode it.
+std::pair<int, int> parse_raw_dimensions(const std::string& path) {
+    size_t ext = path.rfind(".bgr888");
+    if (ext == std::string::npos) return {0, 0};
+    size_t underscore = path.rfind('_', ext);
+    if (underscore == std::string::npos) return {0, 0};
+    std::string dims = path.substr(underscore + 1, ext - underscore - 1);
+    size_t x = dims.find('x');
+    if (x == std::string::npos) return {0, 0};
+    return {std::atoi(dims.substr(0, x).c_str()), std::atoi(dims.substr(x + 1).c_str())};
+}
+
+// Reads the bytes straight into a cv::Mat -- no decoding, since the bytes on
+// disk are already exactly what a CV_8UC3 Mat holds in memory. Returns an
+// empty Mat on any failure, having already printed why.
+cv::Mat load_image(const std::string& path) {
+    auto [width, height] = parse_raw_dimensions(path);
+    if (width <= 0 || height <= 0) {
+        fprintf(stderr, "failed to load %s: only raw \"..._<width>x<height>.bgr888\" "
+            "files are supported\n", path.c_str());
+        return cv::Mat();
+    }
+    std::ifstream f(path, std::ios::binary);
+    if (!f) {
+        fprintf(stderr, "failed to open %s\n", path.c_str());
+        return cv::Mat();
+    }
+    cv::Mat img(height, width, CV_8UC3);
+    size_t expected_bytes = img.total() * img.elemSize();
+    f.read(reinterpret_cast<char*>(img.data), expected_bytes);
+    if (!f) {
+        fprintf(stderr, "failed to read %s: expected %zu bytes for %dx%d\n",
+            path.c_str(), expected_bytes, width, height);
+        return cv::Mat();
+    }
+    return img;
+}
 
 // Prints one box as "(x,y)-(x,y)-(x,y)-(x,y)", preserving the full quad
 // shape (useful for tilted/skewed boxes) that a top-left+center summary
@@ -159,8 +203,8 @@ CycleTotals run_cycles(const cv::Mat& img_orig, const TextSystem& text_system,
 int main(int argc, char** argv) {
     if (argc < 5) {
         fprintf(stderr,
-                "usage: %s <det_model.rknn> <rec_model.rknn> <char_dict.txt> <image.jpg> "
-                "[cycles=1] [drop_score=0.4] [det_thresh=0.3] [box_thresh=0.4] "
+                "usage: %s <det_model.rknn> <rec_model.rknn> <char_dict.txt> <image_WxH.bgr888> "
+                "[cycles=1] [drop_score=0.4] [det_thresh=0.2] [box_thresh=0.4] "
                 "[unclip_ratio=1.5] [max_candidates=3000]\n",
                 argv[0]);
         return 1;
@@ -171,11 +215,13 @@ int main(int argc, char** argv) {
     const std::string image_path = argv[4];
     const int cycles = argc > 5 ? std::atoi(argv[5]) : 1;
     const double drop_score = argc > 6 ? std::atof(argv[6]) : 0.4;
-    // Detection knobs below were never exposed for testing before -- they've
-    // been hardcoded since the very first commit with no record of any value
-    // other than these defaults ever being tried. Exposing them here lets a
-    // sweep compare alternatives without recompiling for every combination.
-    const float det_thresh = argc > 7 ? std::atof(argv[7]) : 0.3f;
+    // Detection knobs are CLI-configurable so a sweep can compare values
+    // without recompiling. The defaults match api/ocr_server.cpp's production
+    // values, so a plain run reproduces server behaviour: det_thresh 0.2 won a
+    // 36-combination sweep over 394 ground-truth fields across 5 real screens
+    // (82.5% vs 80.7% at the old 0.3) -- see Appendix C of
+    // documentation/Automation_Pipeline.docx.
+    const float det_thresh = argc > 7 ? std::atof(argv[7]) : 0.2f;
     const float box_thresh = argc > 8 ? std::atof(argv[8]) : 0.4f;
     const float unclip_ratio = argc > 9 ? std::atof(argv[9]) : 1.5f;
     const int max_candidates = argc > 10 ? std::atoi(argv[10]) : 3000;
@@ -198,21 +244,19 @@ int main(int argc, char** argv) {
     if (img.empty()) {
         return 1;  // load_image already printed the failure reason
     }
-    printf("Image load/decode : %.1f ms  (%zu bytes on disk)\n", load_ms,
-           static_cast<size_t>(std::ifstream(image_path, std::ios::binary | std::ios::ate).tellg()));
+    printf("Image load       : %.1f ms  (%zu bytes)\n", load_ms, img.total() * img.elemSize());
 
     printf("Loading models (not included in timing)...\n");
     // Same construction as ocr_server.cpp, except every detection knob here
     // is CLI-configurable instead of fixed, so a sweep script can compare
-    // alternatives without recompiling. Once a winner is found, carry the
-    // chosen values back over to ocr_server.cpp's hardcoded constructor call.
-    TextDetector detector(det_model_path, /*target=*/"", /*device_id=*/"",
+    // alternatives without recompiling.
+    TextDetector detector(det_model_path,
                           det_thresh, box_thresh, unclip_ratio, max_candidates);
     if (!detector.is_loaded()) {
         fprintf(stderr, "det model failed to load\n");
         return 1;
     }
-    TextRecognizer recognizer(rec_model_path, /*target=*/"", /*device_id=*/"", char_dict_path);
+    TextRecognizer recognizer(rec_model_path, char_dict_path);
     if (!recognizer.is_loaded()) {
         fprintf(stderr, "rec model failed to load\n");
         return 1;
